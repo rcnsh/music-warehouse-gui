@@ -25,6 +25,8 @@ Spotify grant has expired; only the live strip and top lists say so.
 cargo run --release
 ```
 
+The window reopens where you left it, on the same page and ranges.
+
 On first launch, enter the Worker URL and its READ_TOKEN. The token is stored
 in the macOS Keychain, never on disk. See [CLAUDE.md](CLAUDE.md) for the pinned
 GPUI versions and how to upgrade them.

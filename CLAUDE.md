@@ -93,6 +93,18 @@ API notes for the pinned versions: `AsyncApp::update` returns `R` (not
 `cx.new` needs `gpui::AppContext` in scope; `Window::render_to_image` needs
 `test-support` on both `gpui` and `gpui_platform`.
 
+## Remembered window and view state
+
+`src/ui_state.rs` keeps the window frame, last page and Overview ranges in
+`ui-state.json`, next to `config.json` but separate from it, so a bad file
+only costs a window position. Anything unreadable falls back to defaults.
+
+GPUI quirk: `Window::window_bounds()` reports the outer frame (title bar
+included), but opening a window treats `WindowOptions::window_bounds` as the
+content area (`initWithContentRect` in `gpui-pre-macos`). Saving the frame
+grows the window by a title bar each launch, so the saved size is
+`viewport_size()`. Re-check this after a GPUI upgrade.
+
 ## Album art
 
 GPUI's `img()` downloads through the App's HTTP client, set in `main.rs` from

@@ -5,6 +5,7 @@ use crate::dates::{self, DateRange, RangePreset};
 use crate::models::{DailyResponse, TopArtistsResponse, TopResponse};
 use crate::runtime;
 use crate::state::Remote;
+use crate::ui_state;
 
 pub const TOP_ARTISTS_LIMIT: u32 = 50;
 pub const SPOTIFY_TOP_LIMIT: u32 = 10;
@@ -28,10 +29,18 @@ pub struct OverviewStore {
 
 impl OverviewStore {
     pub fn new(client: ApiClient, cx: &mut Context<Self>) -> Self {
-        let preset = RangePreset::Last30Days;
-        let range = preset
-            .resolve(dates::today_local())
-            .expect("30-day preset always resolves");
+        let saved = ui_state::get(cx);
+        let (preset, range) = saved
+            .range
+            .as_ref()
+            .and_then(|r| r.restore(dates::today_local()))
+            .unwrap_or_else(|| {
+                let preset = RangePreset::Last30Days;
+                let range = preset
+                    .resolve(dates::today_local())
+                    .expect("30-day preset always resolves");
+                (preset, range)
+            });
         let mut store = Self {
             client,
             tz: dates::system_timezone(),
@@ -39,7 +48,7 @@ impl OverviewStore {
             range,
             daily: Remote::default(),
             artists: Remote::default(),
-            spotify_range: TopRange::Short,
+            spotify_range: ui_state::spotify_range(&saved).unwrap_or(TopRange::Short),
             spotify_top: Remote::default(),
             _range_tasks: Vec::new(),
             _spotify_task: None,

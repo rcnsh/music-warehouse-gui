@@ -28,6 +28,7 @@ use crate::api::{ApiClient, ApiError, TopRange};
 use crate::dates::{self, RangePreset};
 use crate::models::{DayCount, ImageRef, join_names, pick_image};
 use crate::state::overview::OverviewStore;
+use crate::ui_state::{self, SavedRange};
 use crate::views::history::group;
 use crate::views::widgets;
 
@@ -210,7 +211,14 @@ impl OverviewView {
                 .default_value(range.query_to())
         });
         let subscriptions = vec![
-            cx.observe(&store, |this, _, cx| {
+            cx.observe(&store, |this, store, cx| {
+                let store = store.read(cx);
+                let range = SavedRange::new(store.preset, &store.range);
+                let spotify = store.spotify_range.as_param().to_owned();
+                ui_state::update(cx, |state| {
+                    state.range = Some(range);
+                    state.spotify_range = Some(spotify);
+                });
                 this.artists_table.update(cx, |_, cx| cx.notify());
                 cx.notify();
             }),

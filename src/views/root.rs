@@ -6,6 +6,7 @@ use gpui::{
 
 use crate::api::{self, ApiClient, Secret};
 use crate::config::{self, Config};
+use crate::ui_state;
 use crate::views::setup::{SetupEvent, SetupView};
 use crate::views::shell::{Shell, ShellEvent};
 use crate::views::widgets;
@@ -25,6 +26,7 @@ pub struct AppRoot {
     /// The client the shell was built with, so cancelling Settings restores it.
     client: Option<ApiClient>,
     _subscription: Option<Subscription>,
+    _window_bounds: Subscription,
 }
 
 impl AppRoot {
@@ -33,6 +35,15 @@ impl AppRoot {
             screen: Screen::Starting,
             client: None,
             _subscription: None,
+            // Observed here rather than in the shell so the frame is kept
+            // from setup and settings too.
+            _window_bounds: cx.observe_window_bounds(window, |_, window, cx| {
+                let (bounds, content) = (window.window_bounds(), window.viewport_size());
+                ui_state::update(cx, |state| {
+                    let saved = ui_state::SavedWindow::capture(bounds, content, state.window);
+                    state.window = Some(saved);
+                });
+            }),
         };
         // Reading the Keychain blocks while macOS shows an access prompt
         // (after every rebuild, for an unsigned binary), so it runs off the

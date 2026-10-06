@@ -7,6 +7,7 @@ mod dev_capture;
 mod models;
 mod runtime;
 mod state;
+mod ui_state;
 mod views;
 
 use gpui::{App, AppContext, Bounds, TitlebarOptions, WindowBounds, WindowOptions, px, size};
@@ -33,9 +34,16 @@ fn main() {
         actions::bind(cx);
         cx.activate(true);
 
-        let bounds = Bounds::centered(None, size(px(1180.), px(820.)), cx);
+        let saved = ui_state::init(cx);
+        let displays: Vec<_> = cx.displays().iter().map(|d| d.bounds()).collect();
+        let window_bounds = saved
+            .window
+            .and_then(|w| w.restore(&displays))
+            .unwrap_or_else(|| {
+                WindowBounds::Windowed(Bounds::centered(None, size(px(1180.), px(820.)), cx))
+            });
         let options = WindowOptions {
-            window_bounds: Some(WindowBounds::Windowed(bounds)),
+            window_bounds: Some(window_bounds),
             titlebar: Some(TitlebarOptions {
                 title: Some("Music Warehouse".into()),
                 ..Default::default()

@@ -19,6 +19,7 @@ use crate::actions::{
 };
 use crate::api::ApiClient;
 use crate::state::now_playing::NowPlayingStore;
+use crate::ui_state::{self, SavedPage};
 use crate::views::history::HistoryView;
 use crate::views::now_playing::NowPlayingStrip;
 use crate::views::overview::{OverviewEvent, OverviewView};
@@ -97,7 +98,11 @@ impl Shell {
             _subscriptions: subscriptions,
         };
         shell.set_visible(visible, cx);
-        shell.history.update(cx, |h, cx| h.focus_table(window, cx));
+        let page = match ui_state::get(cx).page {
+            Some(SavedPage::Overview) => Page::Overview,
+            _ => Page::History,
+        };
+        shell.show(page, window, cx);
         shell
     }
 
@@ -130,6 +135,11 @@ impl Shell {
 
     fn show(&mut self, page: Page, window: &mut Window, cx: &mut Context<Self>) {
         self.page = page;
+        let saved = match page {
+            Page::History => SavedPage::History,
+            Page::Overview => SavedPage::Overview,
+        };
+        ui_state::update(cx, |state| state.page = Some(saved));
         match page {
             Page::History => self.history.update(cx, |h, cx| h.focus_table(window, cx)),
             Page::Overview => {
