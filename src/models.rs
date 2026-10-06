@@ -139,20 +139,31 @@ pub fn pick_image(images: &[ImageRef], min_px: u32) -> Option<&str> {
         .map(|i| i.url.as_str())
 }
 
+/// Sizes Spotify's CDN serves for album art.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Rendition {
+    Px64,
+    Px300,
+}
+
 /// Stored rows keep only the 640px album image. Spotify's CDN encodes the size
-/// in the URL's hash prefix, so swap to the 64px rendition of the same image
-/// for table thumbnails (2.7 KB instead of ~96 KB). The prefix is a CDN
+/// in the URL's hash prefix, so swap in the rendition a view needs: a 64px
+/// table thumbnail is 2.7 KB instead of ~96 KB. The prefix is a CDN
 /// convention, not a documented API, so anything unrecognised is left as is.
-pub fn album_thumbnail(url: &str) -> String {
-    const LARGE: &str = "/image/ab67616d0000b273";
-    const MEDIUM: &str = "/image/ab67616d00001e02";
-    const SMALL: &str = "/image/ab67616d00004851";
-    if url.starts_with("https://i.scdn.co/") {
-        for prefix in [LARGE, MEDIUM] {
-            if url.contains(prefix) {
-                return url.replacen(prefix, SMALL, 1);
-            }
-        }
+pub fn album_rendition(url: &str, size: Rendition) -> String {
+    const PREFIXES: [&str; 3] = [
+        "/image/ab67616d0000b273",
+        "/image/ab67616d00001e02",
+        "/image/ab67616d00004851",
+    ];
+    let wanted = match size {
+        Rendition::Px64 => "/image/ab67616d00004851",
+        Rendition::Px300 => "/image/ab67616d00001e02",
+    };
+    if url.starts_with("https://i.scdn.co/")
+        && let Some(prefix) = PREFIXES.iter().find(|p| url.contains(**p))
+    {
+        return url.replacen(prefix, wanted, 1);
     }
     url.to_owned()
 }
@@ -230,17 +241,30 @@ mod tests {
     #[test]
     fn stored_album_urls_shrink_to_the_64px_rendition() {
         assert_eq!(
-            album_thumbnail("https://i.scdn.co/image/ab67616d0000b2732e02117d76426a08ac7c174f"),
+            album_rendition(
+                "https://i.scdn.co/image/ab67616d0000b2732e02117d76426a08ac7c174f",
+                Rendition::Px64
+            ),
             "https://i.scdn.co/image/ab67616d000048512e02117d76426a08ac7c174f"
         );
         assert_eq!(
-            album_thumbnail("https://i.scdn.co/image/ab67616d00001e022e02117d76426a08ac7c174f"),
+            album_rendition(
+                "https://i.scdn.co/image/ab67616d00001e022e02117d76426a08ac7c174f",
+                Rendition::Px64
+            ),
             "https://i.scdn.co/image/ab67616d000048512e02117d76426a08ac7c174f"
         );
         // Artist images and other hosts use different prefixes; leave them alone.
         let artist = "https://i.scdn.co/image/ab6761610000e5eb0123";
-        assert_eq!(album_thumbnail(artist), artist);
+        assert_eq!(album_rendition(artist, Rendition::Px64), artist);
         let other = "https://example.com/image/ab67616d0000b273x";
-        assert_eq!(album_thumbnail(other), other);
+        assert_eq!(album_rendition(other, Rendition::Px300), other);
+        assert_eq!(
+            album_rendition(
+                "https://i.scdn.co/image/ab67616d000048512e02",
+                Rendition::Px300
+            ),
+            "https://i.scdn.co/image/ab67616d00001e022e02"
+        );
     }
 }

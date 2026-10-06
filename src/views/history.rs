@@ -1,23 +1,26 @@
 use gpui::AppContext as _;
 use gpui::{
-    App, Context, Entity, FocusHandle, Focusable, IntoElement, ParentElement, Render, SharedString,
-    Styled, Subscription, Window, div, prelude::FluentBuilder, px,
+    App, ClipboardItem, Context, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement,
+    ParentElement, Render, SharedString, Styled, Subscription, Window, div, prelude::FluentBuilder,
+    px,
 };
 use gpui_component::{
-    ActiveTheme, Icon, Sizable,
+    ActiveTheme, Icon, Sizable, WindowExt,
     button::{Button, ButtonVariants},
     h_flex,
     input::{Input, InputEvent, InputState},
-    table::{Column, DataTable, TableDelegate, TableState},
+    notification::Notification,
+    table::{Column, DataTable, TableDelegate, TableEvent, TableState},
     v_flex,
 };
 use gpui_kit_assets::IconName;
 
+use crate::actions::{CopyPlay, OpenInSpotify};
 use crate::api::ApiClient;
 use crate::dates;
-use crate::models::{Play, album_thumbnail};
+use crate::models::{Play, Rendition, album_rendition};
 use crate::state::history::{HistoryStore, PAGE_SIZE};
-use crate::views::widgets;
+use crate::views::{play_detail, widgets};
 
 const COL_ART: usize = 0;
 const COL_TIME: usize = 1;
@@ -96,7 +99,7 @@ impl TableDelegate for PlaysTable {
             let url = play
                 .image_url
                 .as_deref()
-                .map(|url| SharedString::from(album_thumbnail(url)));
+                .map(|url| SharedString::from(album_rendition(url, Rendition::Px64)));
             return widgets::artwork(url, px(22.), false, cx);
         }
         let muted = cx.theme().muted_foreground;
@@ -212,6 +215,12 @@ impl HistoryView {
 
         let subscriptions = vec![
             cx.observe(&store, |this, _, cx| this.rebuild_rows(cx)),
+            // The details panel follows the table's selection.
+            cx.subscribe(&table, |_, _, event: &TableEvent, cx| {
+                if matches!(event, TableEvent::SelectRow(_) | TableEvent::ClearSelection) {
+                    cx.notify();
+                }
+            }),
             cx.subscribe_in(&filter, window, Self::on_filter_event),
         ];
         Self {
@@ -254,6 +263,33 @@ impl HistoryView {
             InputEvent::PressEnter { .. } => self.focus_table(window, cx),
             _ => {}
         }
+    }
+
+    fn selected_play(&self, cx: &App) -> Option<Play> {
+        let table = self.table.read(cx);
+        let row = table.selected_row()?;
+        table.delegate().play(row, cx).cloned()
+    }
+
+    fn open_selected(&mut self, _: &OpenInSpotify, _: &mut Window, cx: &mut Context<Self>) {
+        if let Some(play) = self.selected_play(cx) {
+            cx.open_url(&play_detail::track_url(&play.track_id));
+        }
+    }
+
+    fn copy_selected(&mut self, _: &CopyPlay, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(play) = self.selected_play(cx) {
+            cx.write_to_clipboard(ClipboardItem::new_string(play_detail::copy_text(&play)));
+            window.push_notification(Notification::success("Copied track and link"), cx);
+        }
+    }
+
+    fn close_details(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.table.update(cx, |table, cx| table.clear_selection(cx));
+        self.focus_table(window, cx);
+        // focus_table selects the first row when nothing is selected; closing
+        // the panel should leave nothing selected.
+        self.table.update(cx, |table, cx| table.clear_selection(cx));
     }
 
     pub fn focus_filter(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -328,7 +364,24 @@ impl Render for HistoryView {
                 .into_any_element(),
         };
 
+        let detail = self.selected_play(cx).map(|play| {
+            let actions = play_detail::DetailActions {
+                on_open: Box::new(cx.listener(|this, _, window, cx| {
+                    this.open_selected(&OpenInSpotify, window, cx)
+                })),
+                on_copy: Box::new(
+                    cx.listener(|this, _, window, cx| this.copy_selected(&CopyPlay, window, cx)),
+                ),
+                on_close: Box::new(
+                    cx.listener(|this, _, window, cx| this.close_details(window, cx)),
+                ),
+            };
+            play_detail::render(&play, actions, cx)
+        });
+
         v_flex()
+            .on_action(cx.listener(Self::open_selected))
+            .on_action(cx.listener(Self::copy_selected))
             .size_full()
             .child(
                 h_flex()
@@ -362,7 +415,14 @@ impl Render for HistoryView {
                     cx,
                 )))
             })
-            .child(div().flex_1().min_h_0().child(body))
+            .child(
+                h_flex()
+                    .flex_1()
+                    .min_h_0()
+                    .items_stretch()
+                    .child(div().flex_1().min_w_0().h_full().child(body))
+                    .when_some(detail, |this, detail| this.child(detail)),
+            )
             .child(
                 h_flex()
                     .gap_3()

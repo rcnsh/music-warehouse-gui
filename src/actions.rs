@@ -8,6 +8,8 @@ actions!(
         Refresh,
         FocusFilter,
         OpenSettings,
+        OpenInSpotify,
+        CopyPlay,
         Quit
     ]
 );
@@ -27,6 +29,8 @@ pub fn bind(cx: &mut App) {
         KeyBinding::new("cmd-q", Quit, None),
         KeyBinding::new("j", gpui_base::actions::SelectDown, Some(TABLE_CONTEXT)),
         KeyBinding::new("k", gpui_base::actions::SelectUp, Some(TABLE_CONTEXT)),
+        KeyBinding::new("o", OpenInSpotify, Some(TABLE_CONTEXT)),
+        KeyBinding::new("cmd-c", CopyPlay, Some(TABLE_CONTEXT)),
     ]);
     cx.on_action(|_: &Quit, cx| cx.quit());
     // The menu bar mirrors the shortcuts so they are discoverable.

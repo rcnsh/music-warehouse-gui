@@ -21,6 +21,16 @@ only to the macOS Keychain (service `music-warehouse-gui`, account
 Never use or store ADMIN_TOKEN. Setup refuses it (`ApiClient::token_is_admin`).
 Secrets never go in git, logs, fixtures or command output.
 
+### Keychain prompts after rebuilding
+
+The binary is ad-hoc signed, so every rebuild has a new code signature and
+macOS asks again before releasing the Keychain item ("Always Allow" only
+covers that one build). The app reads the Keychain off the main thread and
+shows "Reading settings from the Keychain…" while the prompt is open. For
+automated runs, a `dev-capture` build reads READ_TOKEN from a dotenv file
+instead: `MWGUI_DEV_TOKEN_FILE=~/dev/music-warehouse/.dev.vars`. Only the
+`READ_TOKEN=` line is used. Normal builds don't compile that path.
+
 ### Screenshots without a Screen Recording grant
 
 `cargo run --features dev-capture` with `MWGUI_CAPTURE_DIR=/some/dir` set makes
@@ -78,7 +88,7 @@ GPUI's `img()` downloads through the App's HTTP client, set in `main.rs` from
 `gpui-pre-reqwest-client` (pinned with gpui-pre). Decoded images live in
 GPUI's global asset cache. Live responses carry several sizes, and
 `models::pick_image` takes the smallest one that is big enough. Stored rows only
-have the 640px URL, so `models::album_thumbnail` swaps in the 64px rendition by
+have the 640px URL, so `models::album_rendition` swaps in the 64px or 300px rendition by
 CDN prefix. That prefix is a Spotify CDN convention, not an API, so any
 unrecognised URL passes through unchanged.
 
