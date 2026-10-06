@@ -299,7 +299,7 @@ impl HistoryView {
         self.reset_table(cx);
     }
 
-    fn back_to_newest(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn back_to_newest(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.jump
             .update(cx, |input, cx| input.set_value("", window, cx));
         self.jump_error = None;

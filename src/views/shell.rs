@@ -14,12 +14,15 @@ use gpui_component::{
 };
 use gpui_kit_assets::IconName;
 
-use crate::actions::{FocusFilter, GoToDate, OpenSettings, Refresh, ShowHistory, ShowOverview};
+use crate::actions::{
+    FocusFilter, GoToDate, OpenCommandPalette, OpenSettings, Refresh, ShowHistory, ShowOverview,
+};
 use crate::api::ApiClient;
 use crate::state::now_playing::NowPlayingStore;
 use crate::views::history::HistoryView;
 use crate::views::now_playing::NowPlayingStrip;
 use crate::views::overview::{OverviewEvent, OverviewView};
+use crate::views::palette::{self, PaletteCommand};
 
 /// How often History asks for plays newer than its top row. The Worker
 /// ingests every 30 minutes, so polling faster finds nothing; this keeps the
@@ -159,6 +162,41 @@ impl Shell {
         self.history.update(cx, |h, cx| h.focus_jump(window, cx));
     }
 
+    fn on_open_palette(
+        &mut self,
+        _: &OpenCommandPalette,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        palette::open(cx.entity().downgrade(), window, cx);
+    }
+
+    pub fn run_command(
+        &mut self,
+        command: PaletteCommand,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match command {
+            PaletteCommand::ShowHistory => self.show(Page::History, window, cx),
+            PaletteCommand::ShowOverview => self.show(Page::Overview, window, cx),
+            PaletteCommand::FindInHistory => self.on_focus_filter(&FocusFilter, window, cx),
+            PaletteCommand::GoToDate => self.on_go_to_date(&GoToDate, window, cx),
+            PaletteCommand::BackToNewest => {
+                self.history
+                    .update(cx, |h, cx| h.back_to_newest(window, cx));
+                self.show(Page::History, window, cx);
+            }
+            PaletteCommand::Range(preset) => {
+                self.overview
+                    .update(cx, |o, cx| o.select_preset(preset, window, cx));
+                self.show(Page::Overview, window, cx);
+            }
+            PaletteCommand::Refresh => self.on_refresh(&Refresh, window, cx),
+            PaletteCommand::Settings => cx.emit(ShellEvent::OpenSettings),
+        }
+    }
+
     /// Refreshes the visible page and the strip; the hidden page refreshes
     /// itself the next time it is asked, so cmd-R costs only what is on screen.
     fn on_refresh(&mut self, _: &Refresh, _: &mut Window, cx: &mut Context<Self>) {
@@ -193,6 +231,7 @@ impl Render for Shell {
             .on_action(cx.listener(Self::on_show_overview))
             .on_action(cx.listener(Self::on_focus_filter))
             .on_action(cx.listener(Self::on_go_to_date))
+            .on_action(cx.listener(Self::on_open_palette))
             .on_action(cx.listener(Self::on_refresh))
             .on_action(cx.listener(Self::on_open_settings))
             .size_full()

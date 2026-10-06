@@ -14,7 +14,9 @@ gpui-component.
   them are Spotify's own live top lists, with artist photos and album art.
 - **Now playing** strip, polled every 20–30 seconds. It backs off on errors and
   pauses while the window is hidden.
-- ⌘R refreshes, ⌘, opens settings.
+- ⌘K opens a command palette with every command, searchable by name.
+- ⌘R refreshes, ⌘, opens settings. Clicking a day in the Overview chart opens
+  that day in History.
 
 History and Overview read stored rows, so they keep working when the Worker's
 Spotify grant has expired; only the live strip and top lists say so.

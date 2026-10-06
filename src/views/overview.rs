@@ -274,7 +274,12 @@ impl OverviewView {
         cx.notify();
     }
 
-    fn select_preset(&mut self, preset: RangePreset, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn select_preset(
+        &mut self,
+        preset: RangePreset,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.custom_error = None;
         if preset == RangePreset::Custom {
             // Seed the fields with the range on screen, which is the most
