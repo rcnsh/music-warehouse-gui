@@ -68,16 +68,15 @@ and any snapshot may change GPUI's API.
 3. `cargo update -p gpui-pre -p gpui-component`, then run the check script and
    launch the app. Expect compile errors; fix them by reading the new sources,
    not from memory.
-
-`gpui_platform` keeps the `runtime_shaders` feature: Xcode 26 ships without
-the Metal toolchain, and without this feature `gpui-pre-apple` fails to build
-(`cannot execute tool 'metal'`), locally and on CI.
-
 4. Re-check the Overview chart click. `BarChart` has no click callback, so
    `views/overview.rs` rebuilds the chart's band layout with the public
    `ScaleBand` (same padding constants, value labels `Inside` so no measured
    gutter) and hit-tests clicks itself. If the chart's layout changes, clicks
    open the wrong day; click the first, tallest and last bars to confirm.
+
+`gpui_platform` keeps the `runtime_shaders` feature: Xcode 26 ships without
+the Metal toolchain, and without this feature `gpui-pre-apple` fails to build
+(`cannot execute tool 'metal'`), locally and on CI.
 
 ## Where the GPUI examples live
 
