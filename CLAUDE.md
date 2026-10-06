@@ -105,6 +105,10 @@ content area (`initWithContentRect` in `gpui-pre-macos`). Saving the frame
 grows the window by a title bar each launch, so the saved size is
 `viewport_size()`. Re-check this after a GPUI upgrade.
 
+Appearance changes from a global action handler are deferred (`cx.defer`):
+the window that dispatched the action refuses `WindowHandle::update` until
+the dispatch returns, and the failure is silent.
+
 ## Album art
 
 GPUI's `img()` downloads through the App's HTTP client, set in `main.rs` from

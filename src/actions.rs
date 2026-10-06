@@ -1,5 +1,7 @@
 use gpui::{App, KeyBinding, Menu, MenuItem, actions};
 
+use crate::appearance::{self, Appearance};
+
 actions!(
     mwgui,
     [
@@ -9,6 +11,9 @@ actions!(
         FocusFilter,
         GoToDate,
         OpenCommandPalette,
+        UseSystemAppearance,
+        UseLightAppearance,
+        UseDarkAppearance,
         OpenSettings,
         OpenInSpotify,
         CopyPlay,
@@ -37,6 +42,9 @@ pub fn bind(cx: &mut App) {
         KeyBinding::new("cmd-c", CopyPlay, Some(TABLE_CONTEXT)),
     ]);
     cx.on_action(|_: &Quit, cx| cx.quit());
+    cx.on_action(|_: &UseSystemAppearance, cx| appearance::set(Appearance::System, cx));
+    cx.on_action(|_: &UseLightAppearance, cx| appearance::set(Appearance::Light, cx));
+    cx.on_action(|_: &UseDarkAppearance, cx| appearance::set(Appearance::Dark, cx));
     // The menu bar mirrors the shortcuts so they are discoverable.
     cx.set_menus([
         Menu::new("Music Warehouse").items([
@@ -53,6 +61,12 @@ pub fn bind(cx: &mut App) {
             MenuItem::action("Find in History", FocusFilter),
             MenuItem::action("Go to Date…", GoToDate),
             MenuItem::action("Refresh", Refresh),
+            MenuItem::separator(),
+            MenuItem::submenu(Menu::new("Appearance").items([
+                MenuItem::action("Match System", UseSystemAppearance),
+                MenuItem::action("Light", UseLightAppearance),
+                MenuItem::action("Dark", UseDarkAppearance),
+            ])),
         ]),
     ]);
 }

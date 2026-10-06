@@ -5,6 +5,7 @@ use gpui::{
 };
 
 use crate::api::{self, ApiClient, Secret};
+use crate::appearance;
 use crate::config::{self, Config};
 use crate::ui_state;
 use crate::views::setup::{SetupEvent, SetupView};
@@ -27,6 +28,7 @@ pub struct AppRoot {
     client: Option<ApiClient>,
     _subscription: Option<Subscription>,
     _window_bounds: Subscription,
+    _window_appearance: Subscription,
 }
 
 impl AppRoot {
@@ -37,6 +39,10 @@ impl AppRoot {
             _subscription: None,
             // Observed here rather than in the shell so the frame is kept
             // from setup and settings too.
+            // Keeps "Match System" live when macOS switches light and dark.
+            _window_appearance: cx.observe_window_appearance(window, |_, window, cx| {
+                appearance::apply(window, cx);
+            }),
             _window_bounds: cx.observe_window_bounds(window, |_, window, cx| {
                 let (bounds, content) = (window.window_bounds(), window.viewport_size());
                 ui_state::update(cx, |state| {

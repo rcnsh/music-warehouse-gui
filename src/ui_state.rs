@@ -15,6 +15,7 @@ use gpui::{App, Bounds, Global, Pixels, Size, Task, WindowBounds, point, px, siz
 use serde::{Deserialize, Serialize};
 
 use crate::api::TopRange;
+use crate::appearance::Appearance;
 use crate::config;
 use crate::dates::{DateRange, RangePreset};
 
@@ -36,6 +37,7 @@ pub struct UiState {
     pub range: Option<SavedRange>,
     /// Spotify's `time_range` value, e.g. `short_term`.
     pub spotify_range: Option<String>,
+    pub appearance: Option<Appearance>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -379,6 +381,7 @@ mod tests {
             page: Some(SavedPage::History),
             range: Some(SavedRange::LastYear),
             spotify_range: Some("medium_term".into()),
+            appearance: Some(Appearance::Dark),
         };
         let dir = std::env::temp_dir().join(format!("mwgui-ui-rt-{}", std::process::id()));
         save_to(&dir, &state).unwrap();

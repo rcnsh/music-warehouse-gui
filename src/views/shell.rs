@@ -18,6 +18,7 @@ use crate::actions::{
     FocusFilter, GoToDate, OpenCommandPalette, OpenSettings, Refresh, ShowHistory, ShowOverview,
 };
 use crate::api::ApiClient;
+use crate::appearance;
 use crate::state::now_playing::NowPlayingStore;
 use crate::ui_state::{self, SavedPage};
 use crate::views::history::HistoryView;
@@ -204,6 +205,7 @@ impl Shell {
             }
             PaletteCommand::Refresh => self.on_refresh(&Refresh, window, cx),
             PaletteCommand::Settings => cx.emit(ShellEvent::OpenSettings),
+            PaletteCommand::Appearance(choice) => appearance::set(choice, cx),
         }
     }
 

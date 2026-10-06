@@ -1,5 +1,6 @@
 mod actions;
 mod api;
+mod appearance;
 mod config;
 mod dates;
 #[cfg(feature = "dev-capture")]
@@ -11,7 +12,7 @@ mod ui_state;
 mod views;
 
 use gpui::{App, AppContext, Bounds, TitlebarOptions, WindowBounds, WindowOptions, px, size};
-use gpui_component::{Root, Theme};
+use gpui_component::Root;
 
 use crate::views::root::AppRoot;
 
@@ -52,7 +53,7 @@ fn main() {
             ..Default::default()
         };
         cx.open_window(options, |window, cx| {
-            Theme::sync_system_appearance(Some(window), cx);
+            appearance::apply(window, cx);
             let view = cx.new(|cx| AppRoot::new(window, cx));
             // Root hosts gpui-component's overlay layers (tooltips, popovers),
             // which render nothing without it.

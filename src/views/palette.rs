@@ -9,6 +9,7 @@ use gpui_component::{
 use gpui_kit_assets::IconName;
 
 use crate::actions;
+use crate::appearance::Appearance;
 use crate::dates::RangePreset;
 use crate::views::shell::Shell;
 
@@ -22,10 +23,11 @@ pub enum PaletteCommand {
     Range(RangePreset),
     Refresh,
     Settings,
+    Appearance(Appearance),
 }
 
 impl PaletteCommand {
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 13] = [
         Self::ShowHistory,
         Self::ShowOverview,
         Self::FindInHistory,
@@ -36,6 +38,9 @@ impl PaletteCommand {
         Self::Range(RangePreset::LastYear),
         Self::Refresh,
         Self::Settings,
+        Self::Appearance(Appearance::System),
+        Self::Appearance(Appearance::Light),
+        Self::Appearance(Appearance::Dark),
     ];
 
     fn label(self) -> &'static str {
@@ -51,6 +56,9 @@ impl PaletteCommand {
             Self::Range(RangePreset::Custom) => "Overview: Custom Range",
             Self::Refresh => "Refresh",
             Self::Settings => "Settings",
+            Self::Appearance(Appearance::System) => "Appearance: Match System",
+            Self::Appearance(Appearance::Light) => "Appearance: Light",
+            Self::Appearance(Appearance::Dark) => "Appearance: Dark",
         }
     }
 
@@ -68,6 +76,7 @@ impl PaletteCommand {
             Self::Range(RangePreset::Custom) => &["range"],
             Self::Refresh => &["reload", "update"],
             Self::Settings => &["token", "worker", "url", "preferences"],
+            Self::Appearance(_) => &["theme", "mode", "colour", "color"],
         }
     }
 
@@ -79,6 +88,8 @@ impl PaletteCommand {
             Self::GoToDate => IconName::Calendar,
             Self::Refresh => IconName::RefreshCw,
             Self::Settings => IconName::Settings,
+            Self::Appearance(Appearance::Dark) => IconName::Moon,
+            Self::Appearance(_) => IconName::Sun,
         }
     }
 
@@ -92,7 +103,7 @@ impl PaletteCommand {
             Self::GoToDate => Box::new(actions::GoToDate),
             Self::Refresh => Box::new(actions::Refresh),
             Self::Settings => Box::new(actions::OpenSettings),
-            Self::BackToNewest | Self::Range(_) => return None,
+            Self::BackToNewest | Self::Range(_) | Self::Appearance(_) => return None,
         })
     }
 }
@@ -106,10 +117,12 @@ impl PaletteCommand {
 /// has a handler on the dialog's path, so that dispatch does nothing.
 pub fn open(shell: WeakEntity<Shell>, window: &mut Window, cx: &mut App) {
     let state = cx.new(|cx| CommandState::new(window, cx));
+    let current = crate::appearance::current(cx);
     let items: Vec<CommandItem> = PaletteCommand::ALL
         .iter()
         .map(|command| {
             let item = CommandItem::new()
+                .checked(*command == PaletteCommand::Appearance(current))
                 .label(command.label())
                 .icon(command.icon())
                 .keywords(command.keywords().iter().copied());
