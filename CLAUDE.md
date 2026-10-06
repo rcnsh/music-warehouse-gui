@@ -39,6 +39,12 @@ the app watch `<dir>/request`; writing `capture <name>` renders the window to
 `src/dev_capture.rs`. It relies on GPUI's `test-support` feature, so it is never
 part of a normal build.
 
+To drive the app from a script: send keystrokes with `osascript` (paste text
+via `pbcopy` and ⌘V; typed text gets garbled). System Events' `click at`
+performs an accessibility press, which buttons answer but plain `div` mouse
+handlers (the Overview chart) never see. Post a real click instead, with a
+few lines of Swift calling `CGEvent(mouseEventSource:mouseType:…)`.
+
 ## Pinned GPUI versions
 
 | Crate | Version |
@@ -66,6 +72,12 @@ and any snapshot may change GPUI's API.
 `gpui_platform` keeps the `runtime_shaders` feature: Xcode 26 ships without
 the Metal toolchain, and without this feature `gpui-pre-apple` fails to build
 (`cannot execute tool 'metal'`), locally and on CI.
+
+4. Re-check the Overview chart click. `BarChart` has no click callback, so
+   `views/overview.rs` rebuilds the chart's band layout with the public
+   `ScaleBand` (same padding constants, value labels `Inside` so no measured
+   gutter) and hit-tests clicks itself. If the chart's layout changes, clicks
+   open the wrong day; click the first, tallest and last bars to confirm.
 
 ## Where the GPUI examples live
 

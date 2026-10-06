@@ -1,7 +1,12 @@
 use gpui::AppContext as _;
+use std::cell::Cell;
+use std::rc::Rc;
+
+use chrono::NaiveDate;
 use gpui::{
-    AnyElement, App, Context, Entity, FocusHandle, Focusable, IntoElement, ParentElement, Render,
-    SharedString, Styled, Subscription, Window, div, prelude::FluentBuilder, px, relative,
+    AnyElement, App, Bounds, Context, Entity, EventEmitter, FocusHandle, Focusable,
+    InteractiveElement, IntoElement, MouseButton, MouseDownEvent, ParentElement, Pixels, Render,
+    SharedString, Styled, Subscription, Window, canvas, div, prelude::FluentBuilder, px, relative,
 };
 use gpui_component::{
     ActiveTheme, Icon, Selectable, Sizable, StyledExt,
@@ -9,6 +14,10 @@ use gpui_component::{
     chart::BarChart,
     h_flex,
     input::{Input, InputEvent, InputState},
+    plot::{
+        AxisLabelPlacement,
+        scale::{Scale, ScaleBand},
+    },
     scroll::ScrollableElement,
     table::{Column, DataTable, TableDelegate, TableState},
     v_flex,
@@ -139,8 +148,34 @@ impl TableDelegate for ArtistsTable {
     }
 }
 
+/// Band layout shared by the chart and the click hit-test, so a click opens
+/// the bar the chart's hover is highlighting. BarChart has no click callback.
+const BAR_PADDING_INNER: f32 = 0.4;
+const BAR_PADDING_OUTER: f32 = 0.2;
+const BAR_MAX_WIDTH: f32 = 30.;
+
+/// The day a click lands on, given its distance from the chart's left edge.
+/// Mirrors BarChart's own hover hit-test, which only lines up because the
+/// value labels sit inside the plot instead of in a measured gutter.
+pub fn day_index_at(x: f32, width: f32, days: usize) -> Option<usize> {
+    if days == 0 || !(0.0..=width).contains(&x) {
+        return None;
+    }
+    let scale = ScaleBand::new(0..days, [0., width])
+        .padding_inner(BAR_PADDING_INNER)
+        .padding_outer(BAR_PADDING_OUTER)
+        .max_band_width(BAR_MAX_WIDTH);
+    Some(scale.nearest_index(x))
+}
+
+pub enum OverviewEvent {
+    OpenDay(NaiveDate),
+}
+
 pub struct OverviewView {
     store: Entity<OverviewStore>,
+    /// Where the chart was last painted, for turning clicks into days.
+    chart_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
     artists_table: Entity<TableState<ArtistsTable>>,
     from_input: Entity<InputState>,
     to_input: Entity<InputState>,
@@ -184,6 +219,7 @@ impl OverviewView {
         ];
         Self {
             store,
+            chart_bounds: Rc::default(),
             artists_table,
             from_input,
             to_input,
@@ -194,6 +230,22 @@ impl OverviewView {
 
     pub fn refresh(&mut self, cx: &mut Context<Self>) {
         self.store.update(cx, |store, cx| store.refresh(cx));
+    }
+
+    fn on_chart_click(&mut self, event: &MouseDownEvent, _: &mut Window, cx: &mut Context<Self>) {
+        let Some(bounds) = self.chart_bounds.get() else {
+            return;
+        };
+        let Some(days) = self.store.read(cx).daily.data.as_ref().map(|r| &r.days) else {
+            return;
+        };
+        let x = (event.position.x - bounds.origin.x).as_f32();
+        let day = day_index_at(x, bounds.size.width.as_f32(), days.len())
+            .and_then(|ix| days.get(ix))
+            .and_then(|d| NaiveDate::parse_from_str(&d.day, "%Y-%m-%d").ok());
+        if let Some(day) = day {
+            cx.emit(OverviewEvent::OpenDay(day));
+        }
     }
 
     fn on_custom_input(
@@ -313,7 +365,7 @@ impl OverviewView {
             (Some(response), None) => {
                 let range_days = response.days.len() as u64;
                 let accent = cx.theme().primary;
-                BarChart::new(response.days.clone())
+                let chart = BarChart::new(response.days.clone())
                     .band(move |d: &DayCount| dates::day_label(&d.day, range_days))
                     .value(|d: &DayCount| d.plays as f64)
                     .name("Plays")
@@ -323,7 +375,23 @@ impl OverviewView {
                     .value_tick_format(|v| format!("{v:.0}"))
                     .band_tick_count(if range_days <= 7 { 7 } else { 6 })
                     .grid_dashed(false)
-                    .id("daily-chart")
+                    .value_axis_label_placement(AxisLabelPlacement::Inside)
+                    .padding_inner(BAR_PADDING_INNER)
+                    .padding_outer(BAR_PADDING_OUTER)
+                    .max_band_width(px(BAR_MAX_WIDTH))
+                    .id("daily-chart");
+                let bounds = self.chart_bounds.clone();
+                div()
+                    .relative()
+                    .size_full()
+                    .cursor_pointer()
+                    .on_mouse_down(MouseButton::Left, cx.listener(Self::on_chart_click))
+                    .child(chart)
+                    .child(
+                        canvas(move |b, _, _| bounds.set(Some(b)), |_, _, _, _| {})
+                            .absolute()
+                            .size_full(),
+                    )
                     .into_any_element()
             }
         }
@@ -476,6 +544,8 @@ fn ranked_line(
         )
 }
 
+impl EventEmitter<OverviewEvent> for OverviewView {}
+
 impl Focusable for OverviewView {
     fn focus_handle(&self, cx: &App) -> FocusHandle {
         // The artist table is the view's only keyboard-navigable list.
@@ -503,7 +573,7 @@ impl Render for OverviewView {
                     if daily_refreshing {
                         "Plays per day · refreshing…"
                     } else {
-                        "Plays per day"
+                        "Plays per day · click a day to see its plays"
                     },
                     cx,
                 )
@@ -538,5 +608,27 @@ impl Render for OverviewView {
                             .child(self.render_spotify_top(cx)),
                     ),
             )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clicks_map_to_the_nearest_day() {
+        // 30 days over 1000px: outer padding is 0.2 of a 33.3px slot each side.
+        assert_eq!(day_index_at(0., 1000., 30), Some(0));
+        assert_eq!(day_index_at(15., 1000., 30), Some(0));
+        assert_eq!(day_index_at(500., 1000., 30), Some(15));
+        assert_eq!(day_index_at(1000., 1000., 30), Some(29));
+    }
+
+    #[test]
+    fn clicks_outside_the_chart_or_without_data_are_ignored() {
+        assert_eq!(day_index_at(-1., 1000., 30), None);
+        assert_eq!(day_index_at(1001., 1000., 30), None);
+        assert_eq!(day_index_at(10., 1000., 0), None);
+        assert_eq!(day_index_at(999., 1000., 1), Some(0));
     }
 }

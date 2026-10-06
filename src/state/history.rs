@@ -139,6 +139,11 @@ impl HistoryStore {
     /// Shows plays from the end of `day` (local time) backwards, using the
     /// Worker's `before` cursor rather than paging through everything newer.
     pub fn jump_to(&mut self, day: NaiveDate, cx: &mut Context<Self>) {
+        // Today's end is in the future, so that list is the newest one; keep
+        // it unpinned so new plays still arrive on top.
+        if day >= dates::today_local() {
+            return self.show_newest(cx);
+        }
         self.anchor = Some(day);
         self.reload(dates::end_of_local_day_ms(day, &chrono::Local), cx);
     }

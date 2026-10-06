@@ -19,12 +19,13 @@ use crate::api::ApiClient;
 use crate::state::now_playing::NowPlayingStore;
 use crate::views::history::HistoryView;
 use crate::views::now_playing::NowPlayingStrip;
-use crate::views::overview::OverviewView;
+use crate::views::overview::{OverviewEvent, OverviewView};
 
 /// How often History asks for plays newer than its top row. The Worker
-/// ingests on its own schedule, and an empty `after` query costs one indexed
-/// read, so this can be relaxed without missing anything for long.
-const LIVE_HISTORY_EVERY: Duration = Duration::from_secs(120);
+/// ingests every 30 minutes, so polling faster finds nothing; this keeps the
+/// wait after an ingest short while an empty `after` query stays one cheap
+/// indexed read.
+const LIVE_HISTORY_EVERY: Duration = Duration::from_secs(300);
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Page {
@@ -64,12 +65,21 @@ impl Shell {
 
         // Polling stops while the window is minimized, on another Space or
         // fully covered, and resumes with an immediate check when it returns.
-        let subscriptions =
-            vec![
-                cx.observe_window_visibility(window, |this, visibility, _, cx| {
-                    this.set_visible(visibility.is_visible(), cx);
-                }),
-            ];
+        let subscriptions = vec![
+            cx.observe_window_visibility(window, |this, visibility, _, cx| {
+                this.set_visible(visibility.is_visible(), cx);
+            }),
+            cx.subscribe_in(
+                &overview,
+                window,
+                |this, _, event, window, cx| match event {
+                    OverviewEvent::OpenDay(day) => {
+                        this.history.update(cx, |h, cx| h.jump_to(*day, cx));
+                        this.show(Page::History, window, cx);
+                    }
+                },
+            ),
+        ];
         let visible = window.visibility().is_visible();
 
         let mut shell = Self {
