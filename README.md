@@ -46,3 +46,7 @@ macOS as it switches.
 On first launch, enter the Worker URL and its READ_TOKEN. The token is stored
 in the macOS Keychain, never on disk. See [CLAUDE.md](CLAUDE.md) for the pinned
 GPUI versions and how to upgrade them.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
