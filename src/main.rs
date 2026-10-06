@@ -20,6 +20,15 @@ fn main() {
     let app = gpui_platform::application().with_assets(gpui_kit_assets::AllAssets);
 
     app.run(|cx: &mut App| {
+        // GPUI's img() fetches remote artwork through the App's HTTP client;
+        // without one, every image falls back to its placeholder.
+        match reqwest_client::ReqwestClient::user_agent(concat!(
+            "music-warehouse-gui/",
+            env!("CARGO_PKG_VERSION")
+        )) {
+            Ok(client) => cx.set_http_client(std::sync::Arc::new(client)),
+            Err(e) => eprintln!("album art disabled: {e}"),
+        }
         gpui_component::init(cx);
         actions::bind(cx);
         cx.activate(true);

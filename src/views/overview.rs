@@ -17,7 +17,7 @@ use gpui_kit_assets::IconName;
 
 use crate::api::{ApiClient, ApiError, TopRange};
 use crate::dates::{self, RangePreset};
-use crate::models::{DayCount, join_names};
+use crate::models::{DayCount, ImageRef, join_names, pick_image};
 use crate::state::overview::OverviewStore;
 use crate::views::history::group;
 use crate::views::widgets;
@@ -358,12 +358,21 @@ impl OverviewView {
             }
             (None, None) => widgets::loading_panel("Asking Spotify…", cx).into_any_element(),
             (Some(response), None) => {
+                // Lines are 32px tall at 2x, so 64px renditions stay sharp.
                 let artists = response.artists.items.iter().enumerate().map(|(ix, a)| {
-                    ranked_line(ix, a.name.clone().unwrap_or_default(), None, muted)
+                    let art = widgets::artwork(image_url(&a.images), px(32.), true, cx);
+                    ranked_line(ix, art, a.name.clone().unwrap_or_default(), None, muted)
                 });
                 let tracks = response.tracks.items.iter().enumerate().map(|(ix, t)| {
+                    let images = t
+                        .album
+                        .as_ref()
+                        .map(|a| a.images.as_slice())
+                        .unwrap_or_default();
+                    let art = widgets::artwork(image_url(images), px(32.), false, cx);
                     ranked_line(
                         ix,
+                        art,
                         t.name.clone().unwrap_or_default(),
                         Some(join_names(&t.artists)),
                         muted,
@@ -433,15 +442,20 @@ fn section_label(text: &'static str, cx: &App) -> impl IntoElement {
         .child(text)
 }
 
+fn image_url(images: &[ImageRef]) -> Option<SharedString> {
+    pick_image(images, 64).map(|url| SharedString::from(url.to_owned()))
+}
+
 fn ranked_line(
     ix: usize,
+    art: AnyElement,
     title: String,
     subtitle: Option<String>,
     muted: gpui::Hsla,
 ) -> impl IntoElement {
     h_flex()
         .gap_2()
-        .items_start()
+        .items_center()
         .text_sm()
         .child(
             div()
@@ -450,6 +464,7 @@ fn ranked_line(
                 .text_color(muted)
                 .child((ix + 1).to_string()),
         )
+        .child(art)
         .child(
             v_flex()
                 .flex_1()

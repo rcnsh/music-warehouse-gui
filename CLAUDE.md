@@ -72,6 +72,16 @@ API notes for the pinned versions: `AsyncApp::update` returns `R` (not
 `cx.new` needs `gpui::AppContext` in scope; `Window::render_to_image` needs
 `test-support` on both `gpui` and `gpui_platform`.
 
+## Album art
+
+GPUI's `img()` downloads through the App's HTTP client, set in `main.rs` from
+`gpui-pre-reqwest-client` (pinned with gpui-pre). Decoded images live in
+GPUI's global asset cache. Live responses carry several sizes, and
+`models::pick_image` takes the smallest one that is big enough. Stored rows only
+have the 640px URL, so `models::album_thumbnail` swaps in the 64px rendition by
+CDN prefix. That prefix is a Spotify CDN convention, not an API, so any
+unrecognised URL passes through unchanged.
+
 ## Architecture rule
 
 The server computes; the client stays thin. Do not recompute aggregates the

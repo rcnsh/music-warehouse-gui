@@ -2,8 +2,8 @@
 //! failure reads the same wherever it surfaces.
 
 use gpui::{
-    AnyElement, App, ClickEvent, ElementId, IntoElement, ParentElement, SharedString, Styled,
-    Window, div, prelude::FluentBuilder,
+    AnyElement, App, ClickEvent, ElementId, IntoElement, ObjectFit, ParentElement, Pixels,
+    SharedString, Styled, StyledImage, Window, div, img, prelude::FluentBuilder,
 };
 use gpui_component::{
     ActiveTheme, Icon, Sizable, StyledExt, button::Button, h_flex, spinner::Spinner, v_flex,
@@ -169,6 +169,43 @@ pub fn error_banner(
                 .child(copy.detail),
         )
         .child(Button::new(id).xsmall().label("Retry").on_click(on_retry))
+}
+
+/// Album or artist art at a fixed size. Missing art and failed downloads
+/// both show the same placeholder, so a dead image URL never leaves a hole
+/// or shifts the row.
+pub fn artwork(url: Option<SharedString>, size: Pixels, round: bool, cx: &App) -> AnyElement {
+    let placeholder_bg = cx.theme().muted;
+    let placeholder_fg = cx.theme().muted_foreground;
+    let placeholder = move || {
+        div()
+            .size(size)
+            .flex_shrink_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .bg(placeholder_bg)
+            .when(round, |this| this.rounded_full())
+            .when(!round, |this| this.rounded_sm())
+            .child(
+                Icon::new(IconName::Music)
+                    .size(size * 0.5)
+                    .text_color(placeholder_fg),
+            )
+            .into_any_element()
+    };
+    match url {
+        Some(url) => img(url)
+            .size(size)
+            .flex_shrink_0()
+            .object_fit(ObjectFit::Cover)
+            .when(round, |this| this.rounded_full())
+            .when(!round, |this| this.rounded_sm())
+            .with_fallback(placeholder)
+            .with_loading(placeholder)
+            .into_any_element(),
+        None => placeholder(),
+    }
 }
 
 pub fn card(title: impl Into<SharedString>, cx: &App) -> gpui::Div {

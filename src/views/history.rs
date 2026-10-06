@@ -15,9 +15,14 @@ use gpui_kit_assets::IconName;
 
 use crate::api::ApiClient;
 use crate::dates;
-use crate::models::Play;
+use crate::models::{Play, album_thumbnail};
 use crate::state::history::{HistoryStore, PAGE_SIZE};
 use crate::views::widgets;
+
+const COL_ART: usize = 0;
+const COL_TIME: usize = 1;
+const COL_TRACK: usize = 2;
+const COL_ARTIST: usize = 3;
 
 /// Case-insensitive match against the three text columns a person would
 /// remember a play by.
@@ -60,7 +65,7 @@ impl PlaysTable {
 
 impl TableDelegate for PlaysTable {
     fn columns_count(&self, _: &App) -> usize {
-        4
+        5
     }
 
     fn rows_count(&self, _: &App) -> usize {
@@ -69,9 +74,10 @@ impl TableDelegate for PlaysTable {
 
     fn column(&self, col_ix: usize, _: &App) -> Column {
         match col_ix {
-            0 => Column::new("time", "Played").width(px(190.)),
-            1 => Column::new("track", "Track").width(px(320.)),
-            2 => Column::new("artist", "Artist").width(px(240.)),
+            COL_ART => Column::new("art", "").width(px(44.)).resizable(false),
+            COL_TIME => Column::new("time", "Played").width(px(190.)),
+            COL_TRACK => Column::new("track", "Track").width(px(320.)),
+            COL_ARTIST => Column::new("artist", "Artist").width(px(240.)),
             _ => Column::new("album", "Album").width(px(280.)),
         }
     }
@@ -84,25 +90,33 @@ impl TableDelegate for PlaysTable {
         cx: &mut Context<TableState<Self>>,
     ) -> impl IntoElement {
         let Some(play) = self.play(row_ix, cx) else {
-            return div();
+            return div().into_any_element();
         };
+        if col_ix == COL_ART {
+            let url = play
+                .image_url
+                .as_deref()
+                .map(|url| SharedString::from(album_thumbnail(url)));
+            return widgets::artwork(url, px(22.), false, cx);
+        }
         let muted = cx.theme().muted_foreground;
         // Export-era rows lack album names; say so rather than leave a hole
         // that looks like a rendering bug.
         let (text, is_missing): (SharedString, bool) = match col_ix {
-            0 => (
+            COL_TIME => (
                 dates::format_played_at(play.played_at_ms, &chrono::Local).into(),
                 false,
             ),
-            1 => text_or(&play.track_name, "Unknown track"),
-            2 => text_or(&play.artists, "Unknown artist"),
+            COL_TRACK => text_or(&play.track_name, "Unknown track"),
+            COL_ARTIST => text_or(&play.artists, "Unknown artist"),
             _ => text_or(&play.album_name, "No album info"),
         };
         div()
             .truncate()
-            .when(col_ix == 0, |this| this.text_color(muted))
+            .when(col_ix == COL_TIME, |this| this.text_color(muted))
             .when(is_missing, |this| this.text_color(muted).italic())
             .child(text)
+            .into_any_element()
     }
 
     fn cell_text(&self, row_ix: usize, col_ix: usize, cx: &App) -> String {
@@ -110,9 +124,10 @@ impl TableDelegate for PlaysTable {
             return String::new();
         };
         match col_ix {
-            0 => dates::format_played_at(play.played_at_ms, &chrono::Local),
-            1 => play.track_name.clone().unwrap_or_default(),
-            2 => play.artists.clone().unwrap_or_default(),
+            COL_ART => String::new(),
+            COL_TIME => dates::format_played_at(play.played_at_ms, &chrono::Local),
+            COL_TRACK => play.track_name.clone().unwrap_or_default(),
+            COL_ARTIST => play.artists.clone().unwrap_or_default(),
             _ => play.album_name.clone().unwrap_or_default(),
         }
     }

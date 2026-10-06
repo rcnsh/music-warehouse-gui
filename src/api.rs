@@ -362,6 +362,11 @@ mod tests {
         assert_eq!(current.currently_playing_type.as_deref(), Some("track"));
         let item = current.item.unwrap();
         assert_eq!(join_names(&item.artists), "Kendrick Lamar");
+        let thumb = pick_image(item.artwork(), 48).unwrap();
+        assert!(
+            thumb.contains("ab67616d00004851"),
+            "64px rendition: {thumb}"
+        );
         assert!(item.album.unwrap().name.is_some());
     }
 
@@ -377,6 +382,8 @@ mod tests {
         assert_eq!(response.tracks.items.len(), 2);
         assert_eq!(response.artists.items.len(), 2);
         assert!(response.tracks.items[0].name.is_some());
+        assert_eq!(response.artists.items[0].images.len(), 3);
+        assert!(response.tracks.items[0].album.is_some());
     }
 
     #[test]

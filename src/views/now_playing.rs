@@ -1,14 +1,14 @@
 use gpui::{
     Context, Entity, InteractiveElement, IntoElement, ParentElement, Render, SharedString, Styled,
-    Window, div, prelude::FluentBuilder,
+    Window, div, prelude::FluentBuilder, px,
 };
 use gpui_component::{ActiveTheme, Icon, Sizable, StyledExt, h_flex, spinner::Spinner};
 use gpui_kit_assets::IconName;
 
 use crate::api::ApiError;
-use crate::models::{CurrentlyPlaying, join_names};
+use crate::models::{CurrentlyPlaying, join_names, pick_image};
 use crate::state::now_playing::NowPlayingStore;
-use crate::views::widgets::human_seconds;
+use crate::views::widgets::{self, human_seconds};
 
 /// One line of status at the top of the window. Live failures are expected
 /// states of the Worker's proxy, so they read as status rather than alarms.
@@ -31,6 +31,7 @@ enum Tone {
 
 struct Line {
     icon: IconName,
+    art: Option<SharedString>,
     title: SharedString,
     detail: Option<SharedString>,
     tone: Tone,
@@ -51,6 +52,7 @@ fn describe_playing(current: &CurrentlyPlaying) -> Line {
         };
         return Line {
             icon,
+            art: None,
             title: title.into(),
             detail: None,
             tone: Tone::Muted,
@@ -71,6 +73,7 @@ fn describe_playing(current: &CurrentlyPlaying) -> Line {
     };
     Line {
         icon,
+        art: pick_image(item.artwork(), 48).map(|url| url.to_owned().into()),
         title: format!("{state}{name}").into(),
         detail: detail.map(Into::into),
         tone: if current.is_playing {
@@ -110,6 +113,7 @@ fn describe_error(error: &ApiError, retry_at: Option<String>) -> Line {
     };
     Line {
         icon,
+        art: None,
         title: title.into(),
         detail: detail.map(Into::into),
         tone: Tone::Warning,
@@ -129,6 +133,7 @@ impl Render for NowPlayingStrip {
                 Some(current) => describe_playing(current),
                 None => Line {
                     icon: IconName::Music,
+                    art: None,
                     title: "Nothing playing".into(),
                     detail: None,
                     tone: Tone::Muted,
@@ -154,7 +159,11 @@ impl Render for NowPlayingStrip {
                         Tone::Muted => muted,
                         Tone::Warning => warn,
                     };
-                    this.child(Icon::new(line.icon).small().text_color(color))
+                    let art = line
+                        .art
+                        .map(|url| widgets::artwork(Some(url), px(22.), false, cx));
+                    this.when_some(art, |this, art| this.child(art))
+                        .child(Icon::new(line.icon).small().text_color(color))
                         .child(
                             div()
                                 .flex_shrink_0()
