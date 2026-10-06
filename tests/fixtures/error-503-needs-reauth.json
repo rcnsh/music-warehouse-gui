@@ -1,0 +1,4 @@
+{
+  "error": "Spotify connection needs re-authorization.",
+  "needs_reauth": true
+}

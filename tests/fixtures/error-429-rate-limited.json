@@ -1,0 +1,4 @@
+{
+  "error": "Spotify upstream: rate_limited",
+  "retry_after_seconds": 30
+}

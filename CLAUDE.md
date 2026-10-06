@@ -1,0 +1,97 @@
+# music-warehouse-gui
+
+Native macOS app (Rust, GPUI) for exploring the Spotify history stored by the
+music-warehouse Worker (`~/dev/music-warehouse`). Read that repo's README,
+`src/api.ts`, `src/live.ts` and `src/types.ts` before changing anything that
+touches response shapes.
+
+## Build, run, check
+
+```bash
+cargo run                                   # debug build, binary is `mwgui`
+cargo run --release
+cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test   # the check script
+```
+
+First launch shows setup: Worker URL plus READ_TOKEN. The URL is saved to
+`~/Library/Application Support/music-warehouse-gui/config.json`; the token goes
+only to the macOS Keychain (service `music-warehouse-gui`, account
+`READ_TOKEN`). Delete the config file to see first-run setup again.
+
+Never use or store ADMIN_TOKEN. Setup refuses it (`ApiClient::token_is_admin`).
+Secrets never go in git, logs, fixtures or command output.
+
+### Screenshots without a Screen Recording grant
+
+`cargo run --features dev-capture` with `MWGUI_CAPTURE_DIR=/some/dir` set makes
+the app watch `<dir>/request`; writing `capture <name>` renders the window to
+`<dir>/<name>.png`, and `action mwgui::ShowOverview` dispatches an action. See
+`src/dev_capture.rs`. It relies on GPUI's `test-support` feature, so it is never
+part of a normal build.
+
+## Pinned GPUI versions
+
+| Crate | Version |
+|---|---|
+| `gpui` (package `gpui-pre`) | `=0.3.8` |
+| `gpui_platform` (package `gpui-pre-platform`) | `=0.3.8` |
+| `gpui-component` | `=0.7.1` |
+| `gpui-base` | `=0.7.1` |
+| `gpui-kit-assets` | `=0.7.1` |
+
+Each gpui-component release is built against one exact `gpui-pre` snapshot,
+and any snapshot may change GPUI's API.
+
+**Upgrade procedure. Always bump all of them together:**
+
+1. Pick a gpui-component tag and read its root `Cargo.toml`
+   (`git clone https://github.com/longbridge/gpui-component`, `git show vX.Y.Z:Cargo.toml`).
+   The `gpui = { package = "gpui-pre", version = "=…" }` line there is the
+   only gpui-pre version that release supports.
+2. Set every crate in the table above to those exact (`=`) versions.
+3. `cargo update -p gpui-pre -p gpui-component`, then run the check script and
+   launch the app. Expect compile errors; fix them by reading the new sources,
+   not from memory.
+
+`gpui_platform` keeps the `runtime_shaders` feature: Xcode 26 ships without
+the Metal toolchain, and without this feature `gpui-pre-apple` fails to build
+(`cannot execute tool 'metal'`), locally and on CI.
+
+## Where the GPUI examples live
+
+- GPUI: `~/.cargo/registry/src/index.crates.io-*/gpui-pre-<ver>/examples/`
+  (bootstrap, actions, `data_table.rs`, `list_example.rs`).
+- gpui-component: the story/gallery app in the gpui-component repo,
+  `crates/story/src/stories/` (`data_table_story.rs` for lazy loading,
+  `chart_story/` for charts, `input_story.rs`, `tabs_story.rs`) and `examples/`.
+  Component sources: `~/.cargo/registry/src/index.crates.io-*/gpui-component-<ver>/src/`.
+
+API notes for the pinned versions: `AsyncApp::update` returns `R` (not
+`Result`); `Root` and the shared actions (`SelectUp`/`SelectDown`) live in
+`gpui-base`; theme colours are `danger`/`warning`/`muted_foreground`;
+`cx.new` needs `gpui::AppContext` in scope; `Window::render_to_image` needs
+`test-support` on both `gpui` and `gpui_platform`.
+
+## Architecture rule
+
+The server computes; the client stays thin. Do not recompute aggregates the
+API already provides (daily counts, artist counts, rankings). If a view needs
+data the API does not have, stop and propose a new Worker endpoint instead of
+fetching everything and aggregating client-side. The History filter only
+searches loaded rows, and paging pauses while it is active for this reason.
+
+## Layout
+
+- `src/api.rs`: HTTP client, error classification, URL rules
+- `src/models.rs`: response shapes (fixtures in `tests/fixtures/`, see its NOTES.md)
+- `src/config.rs`: config file and Keychain
+- `src/dates.rs`: range presets and custom-range parsing in the system timezone
+- `src/runtime.rs`: Tokio runtime that reqwest runs on; GPUI tasks await its handles
+- `src/state/`: entities that own fetched data (history paging, overview, now-playing poller)
+- `src/views/`: one file per view; `widgets.rs` holds shared loading/empty/error states
+- `src/actions.rs`: actions, keybindings, menus
+
+## Conventions
+
+Comments explain why, not what. Small modules. Plain-English, outcome-focused
+commit messages. No AI model names in commits, code or docs.

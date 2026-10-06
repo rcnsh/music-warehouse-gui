@@ -1,0 +1,4 @@
+/target
+# Window captures contain personal listening history.
+/screenshots
+.DS_Store

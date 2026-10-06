@@ -1,0 +1,527 @@
+use gpui::AppContext as _;
+use gpui::{
+    AnyElement, App, Context, Entity, FocusHandle, Focusable, IntoElement, ParentElement, Render,
+    SharedString, Styled, Subscription, Window, div, prelude::FluentBuilder, px, relative,
+};
+use gpui_component::{
+    ActiveTheme, Icon, Selectable, Sizable, StyledExt,
+    button::{Button, ButtonVariants},
+    chart::BarChart,
+    h_flex,
+    input::{Input, InputEvent, InputState},
+    scroll::ScrollableElement,
+    table::{Column, DataTable, TableDelegate, TableState},
+    v_flex,
+};
+use gpui_kit_assets::IconName;
+
+use crate::api::{ApiClient, ApiError, TopRange};
+use crate::dates::{self, RangePreset};
+use crate::models::{DayCount, join_names};
+use crate::state::overview::OverviewStore;
+use crate::views::history::group;
+use crate::views::widgets;
+
+pub struct ArtistsTable {
+    store: Entity<OverviewStore>,
+}
+
+impl ArtistsTable {
+    fn rows<'a>(&self, cx: &'a App) -> &'a [crate::models::ArtistCount] {
+        self.store
+            .read(cx)
+            .artists
+            .data
+            .as_ref()
+            .map(|r| r.artists.as_slice())
+            .unwrap_or_default()
+    }
+}
+
+impl TableDelegate for ArtistsTable {
+    fn columns_count(&self, _: &App) -> usize {
+        3
+    }
+
+    fn rows_count(&self, cx: &App) -> usize {
+        self.rows(cx).len()
+    }
+
+    fn column(&self, col_ix: usize, _: &App) -> Column {
+        match col_ix {
+            0 => Column::new("rank", "#").width(px(44.)).text_right(),
+            1 => Column::new("artist", "Artist").width(px(260.)),
+            _ => Column::new("plays", "Plays").width(px(220.)),
+        }
+    }
+
+    fn render_td(
+        &mut self,
+        row_ix: usize,
+        col_ix: usize,
+        _: &mut Window,
+        cx: &mut Context<TableState<Self>>,
+    ) -> impl IntoElement {
+        let rows = self.rows(cx);
+        let Some(artist) = rows.get(row_ix) else {
+            return div().into_any_element();
+        };
+        match col_ix {
+            0 => div()
+                .text_color(cx.theme().muted_foreground)
+                .child((row_ix + 1).to_string())
+                .into_any_element(),
+            1 => div()
+                .truncate()
+                .child(artist.name.clone())
+                .into_any_element(),
+            _ => {
+                // The Worker sorts by plays, so the first row is the scale;
+                // nothing is summed or re-ranked here.
+                let top = rows.first().map(|a| a.plays).unwrap_or(1).max(1);
+                let share = artist.plays as f32 / top as f32;
+                h_flex()
+                    .gap_2()
+                    .w_full()
+                    .child(
+                        div()
+                            .w(px(48.))
+                            .text_right()
+                            .child(group(artist.plays as usize)),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .h(px(6.))
+                            .rounded_full()
+                            .bg(cx.theme().muted)
+                            .child(
+                                div()
+                                    .h_full()
+                                    .rounded_full()
+                                    .w(relative(share))
+                                    .bg(cx.theme().primary),
+                            ),
+                    )
+                    .into_any_element()
+            }
+        }
+    }
+
+    fn cell_text(&self, row_ix: usize, col_ix: usize, cx: &App) -> String {
+        let Some(artist) = self.rows(cx).get(row_ix) else {
+            return String::new();
+        };
+        match col_ix {
+            0 => (row_ix + 1).to_string(),
+            1 => artist.name.clone(),
+            _ => artist.plays.to_string(),
+        }
+    }
+
+    fn loading(&self, cx: &App) -> bool {
+        let artists = &self.store.read(cx).artists;
+        artists.loading && artists.data.is_none()
+    }
+
+    fn render_empty(
+        &mut self,
+        _: &mut Window,
+        cx: &mut Context<TableState<Self>>,
+    ) -> impl IntoElement {
+        widgets::state_panel(
+            Some(Icon::new(IconName::Inbox)),
+            "No artists in this range",
+            None,
+            None,
+            cx,
+        )
+    }
+}
+
+pub struct OverviewView {
+    store: Entity<OverviewStore>,
+    artists_table: Entity<TableState<ArtistsTable>>,
+    from_input: Entity<InputState>,
+    to_input: Entity<InputState>,
+    custom_error: Option<SharedString>,
+    _subscriptions: Vec<Subscription>,
+}
+
+impl OverviewView {
+    pub fn new(client: ApiClient, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let store = cx.new(|cx| OverviewStore::new(client, cx));
+        let artists_table = cx.new(|cx| {
+            TableState::new(
+                ArtistsTable {
+                    store: store.clone(),
+                },
+                window,
+                cx,
+            )
+            .col_movable(false)
+            .col_selectable(false)
+            .sortable(false)
+        });
+        let range = store.read(cx).range;
+        let from_input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("YYYY-MM-DD")
+                .default_value(range.query_from())
+        });
+        let to_input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("YYYY-MM-DD")
+                .default_value(range.query_to())
+        });
+        let subscriptions = vec![
+            cx.observe(&store, |this, _, cx| {
+                this.artists_table.update(cx, |_, cx| cx.notify());
+                cx.notify();
+            }),
+            cx.subscribe_in(&from_input, window, Self::on_custom_input),
+            cx.subscribe_in(&to_input, window, Self::on_custom_input),
+        ];
+        Self {
+            store,
+            artists_table,
+            from_input,
+            to_input,
+            custom_error: None,
+            _subscriptions: subscriptions,
+        }
+    }
+
+    pub fn refresh(&mut self, cx: &mut Context<Self>) {
+        self.store.update(cx, |store, cx| store.refresh(cx));
+    }
+
+    fn on_custom_input(
+        &mut self,
+        _: &Entity<InputState>,
+        event: &InputEvent,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let InputEvent::PressEnter { .. } = event {
+            self.apply_custom(cx);
+        }
+    }
+
+    fn apply_custom(&mut self, cx: &mut Context<Self>) {
+        let from = self.from_input.read(cx).value();
+        let to = self.to_input.read(cx).value();
+        match dates::parse_custom(&from, &to, dates::today_local()) {
+            Ok(range) => {
+                self.custom_error = None;
+                self.store
+                    .update(cx, |store, cx| store.set_custom_range(range, cx));
+            }
+            Err(message) => self.custom_error = Some(message.into()),
+        }
+        cx.notify();
+    }
+
+    fn select_preset(&mut self, preset: RangePreset, window: &mut Window, cx: &mut Context<Self>) {
+        self.custom_error = None;
+        if preset == RangePreset::Custom {
+            // Seed the fields with the range on screen, which is the most
+            // likely starting point for an adjustment.
+            let range = self.store.read(cx).range;
+            self.from_input
+                .update(cx, |i, cx| i.set_value(range.query_from(), window, cx));
+            self.to_input
+                .update(cx, |i, cx| i.set_value(range.query_to(), window, cx));
+            self.from_input.update(cx, |i, cx| i.focus(window, cx));
+        }
+        self.store
+            .update(cx, |store, cx| store.select_preset(preset, cx));
+    }
+
+    fn render_range_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let store = self.store.read(cx);
+        let preset = store.preset;
+        let caption = format!("{} · {}", store.range.describe(), store.tz);
+        h_flex()
+            .gap_3()
+            .flex_wrap()
+            .child(h_flex().gap_1().children(RangePreset::ALL.iter().map(|&p| {
+                Button::new(SharedString::from(format!("preset-{}", p.label())))
+                    .small()
+                    .label(p.label())
+                    .selected(p == preset)
+                    .when(p != preset, |b| b.ghost())
+                    .on_click(
+                        cx.listener(move |this, _, window, cx| this.select_preset(p, window, cx)),
+                    )
+            })))
+            .when(preset == RangePreset::Custom, |this| {
+                this.child(
+                    h_flex()
+                        .gap_1()
+                        .child(
+                            div()
+                                .w(px(120.))
+                                .child(Input::new(&self.from_input).small()),
+                        )
+                        .child("–")
+                        .child(div().w(px(120.)).child(Input::new(&self.to_input).small()))
+                        .child(
+                            Button::new("apply-custom")
+                                .small()
+                                .primary()
+                                .label("Apply")
+                                .on_click(cx.listener(|this, _, _, cx| this.apply_custom(cx))),
+                        ),
+                )
+            })
+            .when_some(self.custom_error.clone(), |this, error| {
+                this.child(div().text_sm().text_color(cx.theme().danger).child(error))
+            })
+            .child(div().flex_1())
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(caption),
+            )
+    }
+
+    fn render_chart(&self, cx: &mut Context<Self>) -> AnyElement {
+        let store = self.store.read(cx);
+        let daily = &store.daily;
+        let retry = cx.listener(|this, _, _, cx| this.refresh(cx));
+        match (&daily.data, &daily.error) {
+            (_, Some(error)) => {
+                widgets::error_panel("daily-retry", error, retry, cx).into_any_element()
+            }
+            (None, None) => widgets::loading_panel("Loading daily plays…", cx).into_any_element(),
+            (Some(response), None) if response.days.iter().all(|d| d.plays == 0) => {
+                widgets::state_panel(
+                    Some(Icon::new(IconName::ChartColumn)),
+                    "No plays in this range",
+                    Some(
+                        "Nothing was stored for these days. Plays under about 30 seconds \
+                         may never be recorded by Spotify."
+                            .into(),
+                    ),
+                    None,
+                    cx,
+                )
+                .into_any_element()
+            }
+            (Some(response), None) => {
+                let range_days = response.days.len() as u64;
+                let accent = cx.theme().primary;
+                BarChart::new(response.days.clone())
+                    .band(move |d: &DayCount| dates::day_label(&d.day, range_days))
+                    .value(|d: &DayCount| d.plays as f64)
+                    .name("Plays")
+                    .fill(move |_, _, _, _| accent)
+                    .value_axis(true)
+                    .value_tick_count(4)
+                    .value_tick_format(|v| format!("{v:.0}"))
+                    .band_tick_count(if range_days <= 7 { 7 } else { 6 })
+                    .grid_dashed(false)
+                    .id("daily-chart")
+                    .into_any_element()
+            }
+        }
+    }
+
+    fn render_artists(&self, cx: &mut Context<Self>) -> AnyElement {
+        let artists = &self.store.read(cx).artists;
+        match &artists.error {
+            Some(error) => {
+                let retry = cx.listener(|this, _, _, cx| this.refresh(cx));
+                widgets::error_panel("artists-retry", error, retry, cx).into_any_element()
+            }
+            None => DataTable::new(&self.artists_table)
+                .bordered(false)
+                .into_any_element(),
+        }
+    }
+
+    fn render_spotify_top(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let store = self.store.read(cx);
+        let selected = store.spotify_range;
+        let top = &store.spotify_top;
+        let muted = cx.theme().muted_foreground;
+
+        let body: AnyElement = match (&top.data, &top.error) {
+            (_, Some(error)) => {
+                let retry = cx.listener(move |this, _, _, cx| {
+                    this.store
+                        .update(cx, |s, cx| s.select_spotify_range(selected, cx))
+                });
+                live_error(error, retry, cx)
+            }
+            (None, None) => widgets::loading_panel("Asking Spotify…", cx).into_any_element(),
+            (Some(response), None) => {
+                let artists = response.artists.items.iter().enumerate().map(|(ix, a)| {
+                    ranked_line(ix, a.name.clone().unwrap_or_default(), None, muted)
+                });
+                let tracks = response.tracks.items.iter().enumerate().map(|(ix, t)| {
+                    ranked_line(
+                        ix,
+                        t.name.clone().unwrap_or_default(),
+                        Some(join_names(&t.artists)),
+                        muted,
+                    )
+                });
+                v_flex()
+                    .gap_3()
+                    .child(section_label("Artists", cx))
+                    .children(artists)
+                    .child(section_label("Tracks", cx))
+                    .children(tracks)
+                    .into_any_element()
+            }
+        };
+
+        widgets::card("Spotify's top lists", cx)
+            .size_full()
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(muted)
+                    .child("Live from Spotify, ranked by Spotify. Not from the warehouse."),
+            )
+            .child(h_flex().gap_1().children(TopRange::ALL.iter().map(|&r| {
+                Button::new(SharedString::from(format!("top-{}", r.as_param())))
+                    .xsmall()
+                    .label(r.label())
+                    .selected(r == selected)
+                    .when(r != selected, |b| b.ghost())
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.store.update(cx, |s, cx| s.select_spotify_range(r, cx))
+                    }))
+            })))
+            .child(div().flex_1().min_h_0().overflow_y_scrollbar().child(body))
+    }
+}
+
+/// The live route's documented failures get specific wording; anything else
+/// falls back to the shared error panel.
+fn live_error(
+    error: &ApiError,
+    retry: impl Fn(&gpui::ClickEvent, &mut Window, &mut App) + 'static,
+    cx: &App,
+) -> AnyElement {
+    match error {
+        ApiError::NeedsReauth => widgets::state_panel(
+            Some(Icon::new(IconName::KeyRound)),
+            "Spotify needs re-authorizing",
+            Some(
+                "Live lists are unavailable until the Worker is re-authorized. The chart and \
+                 artist counts come from stored plays and are unaffected."
+                    .into(),
+            ),
+            None,
+            cx,
+        )
+        .into_any_element(),
+        _ => widgets::error_panel("spotify-top-retry", error, retry, cx).into_any_element(),
+    }
+}
+
+fn section_label(text: &'static str, cx: &App) -> impl IntoElement {
+    div()
+        .text_xs()
+        .font_semibold()
+        .text_color(cx.theme().muted_foreground)
+        .child(text)
+}
+
+fn ranked_line(
+    ix: usize,
+    title: String,
+    subtitle: Option<String>,
+    muted: gpui::Hsla,
+) -> impl IntoElement {
+    h_flex()
+        .gap_2()
+        .items_start()
+        .text_sm()
+        .child(
+            div()
+                .w(px(20.))
+                .text_right()
+                .text_color(muted)
+                .child((ix + 1).to_string()),
+        )
+        .child(
+            v_flex()
+                .flex_1()
+                .min_w_0()
+                .child(div().truncate().child(title))
+                .when_some(subtitle, |this, subtitle| {
+                    this.child(div().truncate().text_xs().text_color(muted).child(subtitle))
+                }),
+        )
+}
+
+impl Focusable for OverviewView {
+    fn focus_handle(&self, cx: &App) -> FocusHandle {
+        // The artist table is the view's only keyboard-navigable list.
+        self.artists_table.read(cx).focus_handle(cx)
+    }
+}
+
+impl Render for OverviewView {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let artists_loading_more = {
+            let artists = &self.store.read(cx).artists;
+            artists.loading && artists.data.is_some()
+        };
+        let daily_refreshing = {
+            let daily = &self.store.read(cx).daily;
+            daily.loading && daily.data.is_some()
+        };
+        v_flex()
+            .size_full()
+            .gap_4()
+            .p_4()
+            .child(self.render_range_bar(cx))
+            .child(
+                widgets::card(
+                    if daily_refreshing {
+                        "Plays per day · refreshing…"
+                    } else {
+                        "Plays per day"
+                    },
+                    cx,
+                )
+                .h(px(300.))
+                // The last band label is centred on the final bar and
+                // would otherwise be clipped by the card edge.
+                .child(div().flex_1().min_h_0().pr_6().child(self.render_chart(cx))),
+            )
+            .child(
+                h_flex()
+                    .flex_1()
+                    .min_h_0()
+                    .gap_4()
+                    .items_stretch()
+                    .child(
+                        widgets::card(
+                            if artists_loading_more {
+                                "Top artists · refreshing…"
+                            } else {
+                                "Top artists"
+                            },
+                            cx,
+                        )
+                        .flex_1()
+                        .min_w_0()
+                        .child(div().flex_1().min_h_0().child(self.render_artists(cx))),
+                    )
+                    .child(
+                        div()
+                            .w(px(340.))
+                            .h_full()
+                            .child(self.render_spotify_top(cx)),
+                    ),
+            )
+    }
+}

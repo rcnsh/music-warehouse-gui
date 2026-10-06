@@ -1,0 +1,36 @@
+{
+  "from": "2026-09-07",
+  "to": "2026-10-06",
+  "tz": "Europe/London",
+  "artists": [
+    {
+      "artist_id": "2YZyLoL8N0Wb9xBt1NhZWg",
+      "name": "Kendrick Lamar",
+      "plays": 424
+    },
+    {
+      "artist_id": "5K4W6rqBFWDnAN6FQUkS6x",
+      "name": "Kanye West",
+      "plays": 338
+    },
+    {
+      "artist_id": "1Xyo4u8uXC1ZmMpatF05PJ",
+      "name": "The Weeknd",
+      "plays": 76
+    },
+    {
+      "artist_id": "4tZwfgrHOc3mvqYlEYSvVi",
+      "name": "Daft Punk",
+      "plays": 75
+    },
+    {
+      "artist_id": "6R1kfr0GIWnwxY4zW11Vag",
+      "name": "Frost Children",
+      "plays": 72
+    }
+  ],
+  "_meta": {
+    "rows_read": 8687,
+    "duration_ms": 6.4056
+  }
+}

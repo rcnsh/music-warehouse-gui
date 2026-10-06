@@ -1,0 +1,73 @@
+{
+  "plays": [
+    {
+      "played_at_ms": 1791312948427,
+      "track_id": "67XC51nlZncNpHmZ8rOU9a",
+      "context_uri": "spotify:album:79ONNoS4M9tfIA1mYLBYVX",
+      "context_type": "album",
+      "source": "api",
+      "track_name": "We Cry Together",
+      "duration_ms": 341307,
+      "isrc": "USUM72208973",
+      "album_name": "Mr. Morale & The Big Steppers",
+      "image_url": "https://i.scdn.co/image/ab67616d0000b2732e02117d76426a08ac7c174f",
+      "artists": "Kendrick Lamar, Taylour Paige"
+    },
+    {
+      "played_at_ms": 1791312607130,
+      "track_id": "1QPreu0BNOrUfEb8HTd2qG",
+      "context_uri": "spotify:album:79ONNoS4M9tfIA1mYLBYVX",
+      "context_type": "album",
+      "source": "api",
+      "track_name": "Rich Spirit",
+      "duration_ms": 202285,
+      "isrc": "USUM72208971",
+      "album_name": "Mr. Morale & The Big Steppers",
+      "image_url": "https://i.scdn.co/image/ab67616d0000b2732e02117d76426a08ac7c174f",
+      "artists": "Kendrick Lamar"
+    },
+    {
+      "played_at_ms": 1791312404920,
+      "track_id": "15pyFQHCTVp6T7vaWctSgO",
+      "context_uri": "spotify:album:79ONNoS4M9tfIA1mYLBYVX",
+      "context_type": "album",
+      "source": "api",
+      "track_name": "Rich - Interlude",
+      "duration_ms": 103319,
+      "isrc": "USUM72208970",
+      "album_name": "Mr. Morale & The Big Steppers",
+      "image_url": "https://i.scdn.co/image/ab67616d0000b2732e02117d76426a08ac7c174f",
+      "artists": "Kendrick Lamar"
+    },
+    {
+      "played_at_ms": 1699958874000,
+      "track_id": "3LmDLW5FeqQrQLjMsvnmHQ",
+      "context_uri": null,
+      "context_type": null,
+      "source": "export",
+      "track_name": "211",
+      "duration_ms": null,
+      "isrc": null,
+      "album_name": null,
+      "image_url": null,
+      "artists": "Rukkus"
+    },
+    {
+      "played_at_ms": 1699952588000,
+      "track_id": "4Nlxv66Eo21KZ0x19BzENV",
+      "context_uri": null,
+      "context_type": null,
+      "source": "export",
+      "track_name": "Cosmic Dreamer - Remastered",
+      "duration_ms": null,
+      "isrc": null,
+      "album_name": null,
+      "image_url": null,
+      "artists": "Djjaner"
+    }
+  ],
+  "_meta": {
+    "rows_read": 24,
+    "duration_ms": 2.9473
+  }
+}
