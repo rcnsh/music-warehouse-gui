@@ -130,6 +130,14 @@ pub fn parse_custom(from: &str, to: &str, today: NaiveDate) -> Result<DateRange,
     DateRange::new(from, to)
 }
 
+/// Parses the History "go to date" box. A future day is clamped to today:
+/// asking for tomorrow most likely means "the newest plays", not an error.
+pub fn parse_jump(text: &str, today: NaiveDate) -> Result<NaiveDate, String> {
+    let day = NaiveDate::parse_from_str(text.trim(), "%Y-%m-%d")
+        .map_err(|_| "Enter a date like 2024-05-31.".to_owned())?;
+    Ok(day.min(today))
+}
+
 /// IANA name of the system zone, sent as `tz` so the Worker's day buckets
 /// match the clock on this Mac.
 pub fn system_timezone() -> String {
@@ -138,6 +146,16 @@ pub fn system_timezone() -> String {
 
 pub fn today_local() -> NaiveDate {
     Local::now().date_naive()
+}
+
+/// UTC milliseconds at local midnight ending `day`: the exclusive `before`
+/// bound that lists that day's plays first. `None` only if the zone has no
+/// such midnight at all; across a DST gap the earliest valid instant is used.
+pub fn end_of_local_day_ms<Tz: TimeZone>(day: NaiveDate, tz: &Tz) -> Option<i64> {
+    let next = day.succ_opt()?.and_hms_opt(0, 0, 0)?;
+    tz.from_local_datetime(&next)
+        .earliest()
+        .map(|t| t.timestamp_millis())
 }
 
 /// Formats a play's UTC timestamp in the given zone for the history table.
@@ -252,6 +270,31 @@ mod tests {
         assert_eq!(
             format_played_at(1_791_312_948_427, &tokyo),
             "Wed 7 Oct 2026  03:55"
+        );
+    }
+
+    #[test]
+    fn jump_dates_parse_and_clamp_to_today() {
+        let today = d(2026, 10, 7);
+        assert_eq!(parse_jump(" 2024-05-31 ", today), Ok(d(2024, 5, 31)));
+        assert_eq!(parse_jump("2027-01-01", today), Ok(today));
+        assert!(parse_jump("31/05/2024", today).is_err());
+        assert!(parse_jump("", today).is_err());
+    }
+
+    #[test]
+    fn end_of_day_is_next_local_midnight() {
+        let utc = FixedOffset::east_opt(0).unwrap();
+        // 2026-10-07T00:00:00Z
+        assert_eq!(
+            end_of_local_day_ms(d(2026, 10, 6), &utc),
+            Some(1_791_331_200_000)
+        );
+        // Singapore midnight is 16:00 UTC the previous day.
+        let sgt = FixedOffset::east_opt(8 * 3600).unwrap();
+        assert_eq!(
+            end_of_local_day_ms(d(2026, 10, 6), &sgt),
+            Some(1_791_331_200_000 - 8 * 3_600_000)
         );
     }
 

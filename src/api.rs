@@ -227,6 +227,16 @@ impl ApiClient {
         Ok(response.plays)
     }
 
+    /// Plays strictly newer than `after_ms`, still newest first.
+    pub async fn plays_after(&self, limit: u32, after_ms: i64) -> Result<Vec<Play>, ApiError> {
+        let query = [
+            ("limit", limit.to_string()),
+            ("after", after_ms.to_string()),
+        ];
+        let response: PlaysResponse = self.get(self.endpoint("plays", &query)).await?;
+        Ok(response.plays)
+    }
+
     pub async fn daily(&self, range: &DateRange, tz: &str) -> Result<DailyResponse, ApiError> {
         let query = range_query(range, tz);
         self.get(self.endpoint("daily", &query)).await

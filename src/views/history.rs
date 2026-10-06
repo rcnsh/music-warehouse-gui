@@ -192,6 +192,8 @@ pub struct HistoryView {
     store: Entity<HistoryStore>,
     table: Entity<TableState<PlaysTable>>,
     filter: Entity<InputState>,
+    jump: Entity<InputState>,
+    jump_error: Option<SharedString>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -213,6 +215,8 @@ impl HistoryView {
             InputState::new(window, cx).placeholder("Filter loaded plays by track, artist or album")
         });
 
+        let jump = cx.new(|cx| InputState::new(window, cx).placeholder("Go to date"));
+
         let subscriptions = vec![
             cx.observe(&store, |this, _, cx| this.rebuild_rows(cx)),
             // The details panel follows the table's selection.
@@ -222,21 +226,99 @@ impl HistoryView {
                 }
             }),
             cx.subscribe_in(&filter, window, Self::on_filter_event),
+            cx.subscribe_in(&jump, window, Self::on_jump_event),
         ];
         Self {
             store,
             table,
             filter,
+            jump,
+            jump_error: None,
             _subscriptions: subscriptions,
         }
     }
 
+    /// Rows are positions, so new plays arriving on top would silently move
+    /// the selection to a different play. Follow the play itself instead.
     fn rebuild_rows(&mut self, cx: &mut Context<Self>) {
+        let selected = self.selected_play(cx).map(|p| (p.played_at_ms, p.track_id));
         self.table.update(cx, |table, cx| {
+            let before = table.selected_row();
             table.delegate_mut().rebuild(cx);
+            let after = selected.and_then(|(ms, id)| {
+                table.delegate().rows.iter().position(|&ix| {
+                    let play = &table.delegate().store.read(cx).plays()[ix];
+                    play.played_at_ms == ms && play.track_id == id
+                })
+            });
+            match (before, after) {
+                (Some(old), Some(new)) if old != new => table.set_selected_row(new, cx),
+                (Some(_), None) => table.clear_selection(cx),
+                _ => {}
+            }
             cx.notify();
         });
         cx.notify();
+    }
+
+    fn on_jump_event(
+        &mut self,
+        input: &Entity<InputState>,
+        event: &InputEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            InputEvent::PressEnter { .. } => {
+                let text = input.read(cx).value().to_string();
+                match dates::parse_jump(&text, dates::today_local()) {
+                    Ok(day) => {
+                        self.jump_error = None;
+                        self.jump_to(day, cx);
+                        self.focus_table(window, cx);
+                    }
+                    Err(message) => self.jump_error = Some(message.into()),
+                }
+                cx.notify();
+            }
+            InputEvent::Change if self.jump_error.is_some() => {
+                self.jump_error = None;
+                cx.notify();
+            }
+            _ => {}
+        }
+    }
+
+    pub fn focus_jump(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.jump.update(cx, |input, cx| input.focus(window, cx));
+    }
+
+    /// Public so other views (the Overview chart) can open History at a day.
+    pub fn jump_to(&mut self, day: chrono::NaiveDate, cx: &mut Context<Self>) {
+        self.store.update(cx, |store, cx| store.jump_to(day, cx));
+        self.reset_table(cx);
+    }
+
+    fn back_to_newest(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.jump
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        self.jump_error = None;
+        self.store.update(cx, |store, cx| store.show_newest(cx));
+        self.reset_table(cx);
+    }
+
+    /// Clears what belonged to the old list: a selected row index and the
+    /// scroll offset would otherwise land somewhere arbitrary in the new one.
+    fn reset_table(&mut self, cx: &mut Context<Self>) {
+        self.table.update(cx, |table, cx| {
+            table.clear_selection(cx);
+            table.scroll_to_row(0, cx);
+        });
+    }
+
+    /// Called on a timer by the shell while the window is visible.
+    pub fn check_newer(&mut self, cx: &mut Context<Self>) {
+        self.store.update(cx, |store, cx| store.check_newer(cx));
     }
 
     fn on_filter_event(
@@ -309,10 +391,7 @@ impl HistoryView {
 
     pub fn refresh(&mut self, cx: &mut Context<Self>) {
         self.store.update(cx, |store, cx| store.refresh(cx));
-        self.table.update(cx, |table, cx| {
-            table.clear_selection(cx);
-            table.scroll_to_row(0, cx);
-        });
+        self.reset_table(cx);
     }
 
     fn status_text(&self, cx: &App) -> SharedString {
@@ -328,13 +407,20 @@ impl HistoryView {
             )
             .into();
         }
-        match (store.is_loading(), store.has_more()) {
+        let prefix = match store.anchor() {
+            Some(day) => format!("From {} back · ", day.format("%a %-d %b %Y")),
+            None => String::new(),
+        };
+        let text = match (store.is_loading(), store.has_more()) {
             (true, _) if loaded > 0 => format!("{} plays loaded · loading older…", group(loaded)),
             (true, _) => "Loading…".to_owned(),
             (false, true) => format!("{} plays loaded · scroll for older", group(loaded)),
+            (false, false) if store.anchor().is_some() => {
+                format!("{} plays loaded · reached the oldest", group(loaded))
+            }
             (false, false) => format!("All {} stored plays loaded", group(loaded)),
-        }
-        .into()
+        };
+        format!("{prefix}{text}").into()
     }
 }
 
@@ -351,6 +437,7 @@ impl Render for HistoryView {
         let has_rows = !store.plays().is_empty();
         let can_page_manually = store.has_more() && !store.is_loading() && error.is_none();
         let filtering = !self.table.read(cx).delegate().filter.is_empty();
+        let anchored = store.anchor().is_some();
         let retry = cx.listener(|this, _, _, cx| this.store.update(cx, |s, cx| s.retry(cx)));
 
         let body = match (&error, has_rows) {
@@ -399,12 +486,29 @@ impl Render for HistoryView {
                         ),
                     )
                     .child(
+                        div().w(px(150.)).child(
+                            Input::new(&self.jump)
+                                .prefix(Icon::new(IconName::Calendar).small())
+                                .small(),
+                        ),
+                    )
+                    .child(
                         div()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .child("⌘F filter · Enter to list · j/k move"),
+                            .child("⌘F filter · ⌘G date · j/k move"),
                     ),
             )
+            .when_some(self.jump_error.clone(), |this, message| {
+                this.child(
+                    div()
+                        .px_3()
+                        .py_1()
+                        .text_xs()
+                        .text_color(cx.theme().danger)
+                        .child(message),
+                )
+            })
             .when_some(error.clone().filter(|_| has_rows), |this, error| {
                 let retry =
                     cx.listener(|this, _, _, cx| this.store.update(cx, |s, cx| s.retry(cx)));
@@ -433,6 +537,18 @@ impl Render for HistoryView {
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
                     .child(div().flex_1().child(self.status_text(cx)))
+                    .when(anchored, |this| {
+                        this.child(
+                            Button::new("back-to-newest")
+                                .xsmall()
+                                .ghost()
+                                .icon(IconName::ArrowUp)
+                                .label("Back to newest")
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.back_to_newest(window, cx)
+                                })),
+                        )
+                    })
                     // Scrolling cannot page while a filter is active, so give
                     // an explicit way to widen what the filter searches.
                     .when(filtering && can_page_manually, |this| {

@@ -7,6 +7,7 @@ actions!(
         ShowOverview,
         Refresh,
         FocusFilter,
+        GoToDate,
         OpenSettings,
         OpenInSpotify,
         CopyPlay,
@@ -25,6 +26,7 @@ pub fn bind(cx: &mut App) {
         KeyBinding::new("cmd-2", ShowOverview, None),
         KeyBinding::new("cmd-r", Refresh, None),
         KeyBinding::new("cmd-f", FocusFilter, None),
+        KeyBinding::new("cmd-g", GoToDate, None),
         KeyBinding::new("cmd-,", OpenSettings, None),
         KeyBinding::new("cmd-q", Quit, None),
         KeyBinding::new("j", gpui_base::actions::SelectDown, Some(TABLE_CONTEXT)),
@@ -45,6 +47,7 @@ pub fn bind(cx: &mut App) {
             MenuItem::action("Overview", ShowOverview),
             MenuItem::separator(),
             MenuItem::action("Find in History", FocusFilter),
+            MenuItem::action("Go to Date…", GoToDate),
             MenuItem::action("Refresh", Refresh),
         ]),
     ]);

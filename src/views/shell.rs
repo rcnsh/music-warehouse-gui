@@ -1,7 +1,9 @@
+use std::time::Duration;
+
 use gpui::AppContext as _;
 use gpui::{
     Context, Entity, EventEmitter, FocusHandle, Focusable, InteractiveElement, IntoElement,
-    ParentElement, Render, Styled, Subscription, Window, div, prelude::FluentBuilder,
+    ParentElement, Render, Styled, Subscription, Task, Window, div, prelude::FluentBuilder,
 };
 use gpui_component::{
     ActiveTheme, Sizable,
@@ -12,12 +14,17 @@ use gpui_component::{
 };
 use gpui_kit_assets::IconName;
 
-use crate::actions::{FocusFilter, OpenSettings, Refresh, ShowHistory, ShowOverview};
+use crate::actions::{FocusFilter, GoToDate, OpenSettings, Refresh, ShowHistory, ShowOverview};
 use crate::api::ApiClient;
 use crate::state::now_playing::NowPlayingStore;
 use crate::views::history::HistoryView;
 use crate::views::now_playing::NowPlayingStrip;
 use crate::views::overview::OverviewView;
+
+/// How often History asks for plays newer than its top row. The Worker
+/// ingests on its own schedule, and an empty `after` query costs one indexed
+/// read, so this can be relaxed without missing anything for long.
+const LIVE_HISTORY_EVERY: Duration = Duration::from_secs(120);
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Page {
@@ -40,6 +47,8 @@ pub struct Shell {
     now_playing: Entity<NowPlayingStrip>,
     worker_host: String,
     focus: FocusHandle,
+    /// Dropped while the window is hidden, which stops the loop.
+    live_history: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -58,14 +67,12 @@ impl Shell {
         let subscriptions =
             vec![
                 cx.observe_window_visibility(window, |this, visibility, _, cx| {
-                    this.now_playing_store
-                        .update(cx, |s, cx| s.set_visible(visibility.is_visible(), cx));
+                    this.set_visible(visibility.is_visible(), cx);
                 }),
             ];
         let visible = window.visibility().is_visible();
-        now_playing_store.update(cx, |s, cx| s.set_visible(visible, cx));
 
-        let shell = Self {
+        let mut shell = Self {
             page: Page::History,
             history,
             overview,
@@ -73,10 +80,39 @@ impl Shell {
             now_playing,
             worker_host,
             focus: cx.focus_handle(),
+            live_history: None,
             _subscriptions: subscriptions,
         };
+        shell.set_visible(visible, cx);
         shell.history.update(cx, |h, cx| h.focus_table(window, cx));
         shell
+    }
+
+    fn set_visible(&mut self, visible: bool, cx: &mut Context<Self>) {
+        self.now_playing_store
+            .update(cx, |s, cx| s.set_visible(visible, cx));
+        if !visible {
+            self.live_history = None;
+            return;
+        }
+        if self.live_history.is_some() {
+            return;
+        }
+        // Checks straight away on return, so a laptop opened in the morning
+        // shows last night's plays without waiting a full interval.
+        self.live_history = Some(cx.spawn(async move |this, cx| {
+            loop {
+                let alive = this
+                    .update(cx, |this, cx| {
+                        this.history.update(cx, |h, cx| h.check_newer(cx))
+                    })
+                    .is_ok();
+                if !alive {
+                    break;
+                }
+                cx.background_executor().timer(LIVE_HISTORY_EVERY).await;
+            }
+        }));
     }
 
     fn show(&mut self, page: Page, window: &mut Window, cx: &mut Context<Self>) {
@@ -104,6 +140,13 @@ impl Shell {
             self.show(Page::History, window, cx);
         }
         self.history.update(cx, |h, cx| h.focus_filter(window, cx));
+    }
+
+    fn on_go_to_date(&mut self, _: &GoToDate, window: &mut Window, cx: &mut Context<Self>) {
+        if self.page != Page::History {
+            self.show(Page::History, window, cx);
+        }
+        self.history.update(cx, |h, cx| h.focus_jump(window, cx));
     }
 
     /// Refreshes the visible page and the strip; the hidden page refreshes
@@ -139,6 +182,7 @@ impl Render for Shell {
             .on_action(cx.listener(Self::on_show_history))
             .on_action(cx.listener(Self::on_show_overview))
             .on_action(cx.listener(Self::on_focus_filter))
+            .on_action(cx.listener(Self::on_go_to_date))
             .on_action(cx.listener(Self::on_refresh))
             .on_action(cx.listener(Self::on_open_settings))
             .size_full()

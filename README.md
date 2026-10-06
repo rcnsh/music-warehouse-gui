@@ -6,7 +6,9 @@ gpui-component.
 
 - **History** (⌘1): every stored play in local time with album art, loaded
   page by page as you scroll. ⌘F filters the loaded rows, Enter moves to the
-  list, j/k move.
+  list, j/k move. ⌘G jumps to a date. New plays appear at the top every two
+  minutes while the window is visible. Selecting a play shows its details;
+  `o` opens it in Spotify and ⌘C copies it.
 - **Overview** (⌘2): plays per day and top artists for 7 days, 30 days, a year
   or a custom range, bucketed by the Worker in the system timezone. Alongside
   them are Spotify's own live top lists, with artist photos and album art.
