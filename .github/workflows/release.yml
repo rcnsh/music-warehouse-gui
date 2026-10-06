@@ -1,0 +1,81 @@
+name: release
+
+# Pushing a tag like v0.2.0 builds the app and publishes a GitHub release.
+# Running the workflow by hand builds the same zip as a downloadable artifact
+# without publishing anything, to try a release before tagging it.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-latest
+    env:
+      # Also written into the app's Info.plist by the bundle script.
+      MACOSX_DEPLOYMENT_TARGET: "12.0"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Check script
+        run: cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
+
+      - name: Read version
+        id: version
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "music-warehouse-gui") | .version')
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      # A release whose files say a different version than its tag is
+      # confusing to undo, so refuse it here.
+      - name: Tag matches Cargo.toml
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          if [ "v${{ steps.version.outputs.version }}" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match Cargo.toml version ${{ steps.version.outputs.version }}"
+            exit 1
+          fi
+
+      # One universal binary, so a single download runs on Apple Silicon and
+      # Intel Macs.
+      - name: Build universal binary
+        run: |
+          cargo build --release --locked --target aarch64-apple-darwin
+          cargo build --release --locked --target x86_64-apple-darwin
+          mkdir -p dist
+          lipo -create -output dist/mwgui \
+            target/aarch64-apple-darwin/release/mwgui \
+            target/x86_64-apple-darwin/release/mwgui
+          lipo -info dist/mwgui
+
+      - name: Bundle app
+        run: scripts/bundle-macos.sh dist/mwgui "${{ steps.version.outputs.version }}" dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: music-warehouse-gui-${{ steps.version.outputs.version }}-macos
+          path: |
+            dist/*.zip
+            dist/*.zip.sha256
+          if-no-files-found: error
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/*.zip dist/*.zip.sha256 \
+            --title "Music Warehouse $GITHUB_REF_NAME" \
+            --notes-file .github/release-notes.md \
+            --generate-notes \
+            --verify-tag

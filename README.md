@@ -21,6 +21,20 @@ gpui-component.
 History and Overview read stored rows, so they keep working when the Worker's
 Spotify grant has expired; only the live strip and top lists say so.
 
+## Installing a release
+
+Download the zip from the latest
+[GitHub release](https://github.com/rcnsh/music-warehouse-gui/releases), unzip
+it and move **Music Warehouse.app** to Applications. It is a universal app for
+Apple Silicon and Intel Macs on macOS 12 or later.
+
+The app is signed ad hoc, not notarized, so macOS blocks the first launch
+("Apple could not verify…"). Allow it in **System Settings › Privacy &
+Security › Open Anyway**, or run
+`xattr -dr com.apple.quarantine "/Applications/Music Warehouse.app"`.
+
+## Building from source
+
 ```bash
 cargo run --release
 ```

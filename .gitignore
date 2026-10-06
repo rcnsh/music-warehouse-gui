@@ -2,3 +2,5 @@
 # Window captures contain personal listening history.
 /screenshots
 .DS_Store
+# Release bundles from scripts/bundle-macos.sh.
+/dist

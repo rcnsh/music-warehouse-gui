@@ -45,6 +45,24 @@ performs an accessibility press, which buttons answer but plain `div` mouse
 handlers (the Overview chart) never see. Post a real click instead, with a
 few lines of Swift calling `CGEvent(mouseEventSource:mouseType:…)`.
 
+## Releasing
+
+`.github/workflows/release.yml` publishes a GitHub release when a `v*` tag is
+pushed. It runs the check script, refuses a tag that doesn't match the
+`Cargo.toml` version, builds arm64 and x86_64 and joins them with `lipo`, then
+runs `scripts/bundle-macos.sh` (Info.plist, ad-hoc signature, `ditto` zip,
+SHA-256). The release body is `.github/release-notes.md` followed by
+generated notes.
+
+1. Bump `version` in `Cargo.toml`, run the check script (it updates
+   `Cargo.lock`), commit.
+2. `git tag v0.2.0 && git push origin main v0.2.0`.
+
+Running the workflow by hand (`gh workflow run release.yml`) builds the zip as
+an artifact without publishing, for trying a release first. Not notarized:
+that needs an Apple Developer ID certificate and secrets in the repo, and it
+would also stop each release from asking again for Keychain access.
+
 ## Pinned GPUI versions
 
 | Crate | Version |
