@@ -3,6 +3,10 @@ name: release
 # Pushing a tag like v0.2.0 builds the app and publishes a GitHub release.
 # Running the workflow by hand builds the same zip as a downloadable artifact
 # without publishing anything, to try a release before tagging it.
+#
+# The checks and each architecture's build run on their own runners at the
+# same time, since a release build takes most of a runner's cores; the
+# package job then joins the two binaries into one app.
 on:
   push:
     tags: ["v*"]
@@ -11,24 +15,21 @@ on:
 permissions:
   contents: write
 
+env:
+  # Also written into the app's Info.plist by the bundle script.
+  MACOSX_DEPLOYMENT_TARGET: "12.0"
+
 jobs:
-  release:
+  check:
     runs-on: macos-latest
-    env:
-      # Also written into the app's Info.plist by the bundle script.
-      MACOSX_DEPLOYMENT_TARGET: "12.0"
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-apple-darwin,x86_64-apple-darwin
           components: rustfmt, clippy
-
-      - uses: Swatinem/rust-cache@v2
-
-      - name: Check script
-        run: cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
 
       - name: Read version
         id: version
@@ -46,24 +47,69 @@ jobs:
             exit 1
           fi
 
-      # One universal binary, so a single download runs on Apple Silicon and
-      # Intel Macs.
-      - name: Build universal binary
-        run: |
-          cargo build --release --locked --target aarch64-apple-darwin
-          cargo build --release --locked --target x86_64-apple-darwin
-          mkdir -p dist
-          lipo -create -output dist/mwgui \
-            target/aarch64-apple-darwin/release/mwgui \
-            target/x86_64-apple-darwin/release/mwgui
-          lipo -info dist/mwgui
+      - uses: Swatinem/rust-cache@v2
 
-      - name: Bundle app
-        run: scripts/bundle-macos.sh dist/mwgui "${{ steps.version.outputs.version }}" dist
+      - name: Check script
+        run: cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
+
+  build:
+    strategy:
+      matrix:
+        target: [aarch64-apple-darwin, x86_64-apple-darwin]
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      # One cache per target: both legs share the job id, so without the
+      # target in the key they would overwrite each other's cache.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Build
+        run: cargo build --release --locked --target ${{ matrix.target }}
 
       - uses: actions/upload-artifact@v4
         with:
-          name: music-warehouse-gui-${{ steps.version.outputs.version }}-macos
+          name: bin-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/mwgui
+          if-no-files-found: error
+          retention-days: 1
+
+  package:
+    needs: [check, build]
+    runs-on: macos-latest
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: bin-*
+
+      # One universal binary, so a single download runs on Apple Silicon and
+      # Intel Macs.
+      - name: Universal binary
+        run: |
+          mkdir -p dist
+          lipo -create -output dist/mwgui \
+            bin-aarch64-apple-darwin/mwgui \
+            bin-x86_64-apple-darwin/mwgui
+          # Artifacts don't keep the executable bit.
+          chmod +x dist/mwgui
+          lipo -info dist/mwgui
+
+      - name: Bundle app
+        run: scripts/bundle-macos.sh dist/mwgui "$VERSION" dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: music-warehouse-gui-${{ env.VERSION }}-macos
           path: |
             dist/*.zip
             dist/*.zip.sha256
