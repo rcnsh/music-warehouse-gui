@@ -1,19 +1,24 @@
-//! The Track page (`/api/track`).
+//! The Track page (`/api/track`): one song's all-time figures and plays per
+//! month, every edition already folded together by the Worker.
 //!
-//! A placeholder until this page's own PR: it already loads its data so the
-//! whole path (shell → view → store → Worker) is exercised. The shell calls
-//! only `new`, `activate`, `refresh`, `set_track` and `Focusable::focus_handle`;
-//! keep those signatures and change everything else freely.
+//! The shell calls only `new`, `activate`, `refresh`, `set_track` and
+//! `Focusable::focus_handle`.
 
 use gpui::AppContext as _;
 use gpui::{
-    App, Context, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement, ParentElement,
-    Render, SharedString, Styled, Subscription, Window, div, px,
+    AnyElement, App, Context, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement,
+    ParentElement, Render, SharedString, Styled, Subscription, Window, div, prelude::FluentBuilder,
+    px,
 };
+use gpui_component::{ActiveTheme, Icon, StyledExt, h_flex, v_flex};
+use gpui_kit_assets::IconName;
 
+use crate::actions::OpenArtist;
 use crate::api::ApiClient;
+use crate::models::{Rendition, TrackHistory, album_rendition};
 use crate::state::track::TrackStore;
-use crate::views::widgets;
+use crate::views::artist::{body, is_spotify_id, months_card, open_in_spotify, stat_tiles};
+use crate::views::{play_detail, widgets};
 
 pub struct TrackView {
     store: Entity<TrackStore>,
@@ -68,37 +73,101 @@ impl Render for TrackView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let retry = cx.listener(|this, _, _, cx| this.refresh(cx));
         let store = self.store.read(cx);
+        let page = widgets::page("track").track_focus(&self.focus);
         let Some(id) = store.id.clone() else {
-            return widgets::page("track")
-                .track_focus(&self.focus)
-                .child(widgets::coming_soon("No track selected", None, cx));
+            return page.child(div().h(px(360.)).child(widgets::state_panel(
+                Some(Icon::new(IconName::Music)),
+                "No song selected",
+                Some("Open a song from History, a ranking or an artist's page.".into()),
+                None,
+                cx,
+            )));
         };
-        let title: SharedString = store
-            .history
-            .data
-            .as_ref()
-            .map(|data| SharedString::from(data.track.name.clone().unwrap_or_default()))
-            .unwrap_or_else(|| "Track".into());
-        let body = widgets::remote_view(
-            "track-retry",
-            &store.history,
-            "Loading track…",
-            retry,
-            cx,
-            |data| {
-                let summary = format!(
-                    "{} plays, {} listened, over {} months",
-                    widgets::count(data.plays.into()),
-                    widgets::minutes(data.minutes.into()),
-                    data.months.len()
-                );
-                widgets::coming_soon("The track page is on its way", Some(summary.into()), cx)
-                    .into_any_element()
-            },
-        );
-        widgets::page("track")
-            .track_focus(&self.focus)
-            .child(widgets::page_header(title, Some(id), None, cx))
-            .child(div().h(px(320.)).child(body))
+        let refreshing = store.history.loading && store.history.data.is_some();
+        page.child(header(store.history.data.as_ref(), &id, refreshing, cx))
+            .child(body(&store.history, "track-retry", retry, cx, |data| {
+                render_history(data, cx)
+            }))
     }
+}
+
+/// Album art, the song over its artist (a link to the Artist page), and
+/// Open in Spotify. Before the first answer only the button shows, since the
+/// id alone is enough for it.
+fn header(data: Option<&TrackHistory>, id: &str, refreshing: bool, cx: &App) -> AnyElement {
+    let muted = cx.theme().muted_foreground;
+    let title: SharedString = match data {
+        Some(d) => d
+            .track
+            .name
+            .clone()
+            .unwrap_or_else(|| "Unknown song".into())
+            .into(),
+        None => "Song".into(),
+    };
+    let image = data
+        .and_then(|d| d.track.image.as_deref())
+        .map(|url| SharedString::from(album_rendition(url, Rendition::Px300)));
+    let artist = data.and_then(|d| d.track.artist.clone());
+    let detail = if refreshing {
+        "Song · every edition · refreshing…"
+    } else {
+        "Song · every edition"
+    };
+    h_flex()
+        .gap_4()
+        .items_end()
+        .child(widgets::artwork(image, px(96.), false, cx))
+        .child(
+            v_flex()
+                .flex_1()
+                .min_w_0()
+                .gap_0p5()
+                .child(div().text_xl().font_semibold().truncate().child(title))
+                .when_some(artist, |this, artist| {
+                    let open = OpenArtist::by_name(&artist);
+                    this.child(div().text_base().child(widgets::link(
+                        "track-artist",
+                        artist,
+                        open,
+                        cx,
+                    )))
+                })
+                .child(div().text_sm().text_color(muted).child(detail)),
+        )
+        .when(is_spotify_id(id), |this| {
+            this.child(open_in_spotify(play_detail::track_url(id)))
+        })
+        .into_any_element()
+}
+
+fn render_history(data: &TrackHistory, cx: &App) -> AnyElement {
+    if data.plays == 0 {
+        let detail = if data.track.name.is_none() {
+            "This song is not in the warehouse."
+        } else {
+            "The warehouse has no plays of this song."
+        };
+        return div()
+            .h(px(320.))
+            .child(widgets::state_panel(
+                Some(Icon::new(IconName::Inbox)),
+                "No plays for this song",
+                Some(detail.into()),
+                None,
+                cx,
+            ))
+            .into_any_element();
+    }
+    v_flex()
+        .gap_4()
+        .child(stat_tiles(
+            data.plays,
+            data.minutes,
+            data.first_played.as_deref(),
+            data.last_played.as_deref(),
+            cx,
+        ))
+        .child(months_card("track-months", &data.months, cx))
+        .into_any_element()
 }

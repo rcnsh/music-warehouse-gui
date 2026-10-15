@@ -1,17 +1,27 @@
-//! The Artist page (`/api/artist`).
+//! The Artist page (`/api/artist`): one artist's all-time figures, plays per
+//! month and most-played songs, exactly as the Worker returns them.
 //!
-//! A placeholder until this page's own PR: it already loads its data so the
-//! whole path (shell → view → store → Worker) is exercised. The shell calls
-//! only `new`, `activate`, `refresh`, `set_artist` and `Focusable::focus_handle`;
-//! keep those signatures and change everything else freely.
+//! The shell calls only `new`, `activate`, `refresh`, `set_artist` and
+//! `Focusable::focus_handle`.
 
+use chrono::{DateTime, TimeZone};
 use gpui::AppContext as _;
 use gpui::{
-    App, Context, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement, ParentElement,
-    Render, SharedString, Styled, Subscription, Window, div, px,
+    AnyElement, App, ClickEvent, Context, Entity, FocusHandle, Focusable, InteractiveElement,
+    IntoElement, ParentElement, Render, SharedString, Styled, Subscription, Window, div,
+    prelude::FluentBuilder, px,
 };
+use gpui_component::{
+    Icon, Sizable,
+    button::{Button, ButtonVariants},
+    h_flex, v_flex,
+};
+use gpui_kit_assets::IconName;
 
+use crate::actions::OpenTrack;
 use crate::api::ApiClient;
+use crate::models::{ARTIST_NAME_PREFIX, ArtistHistory, MonthCount};
+use crate::state::Remote;
 use crate::state::artist::ArtistStore;
 use crate::views::widgets;
 
@@ -68,37 +78,271 @@ impl Render for ArtistView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let retry = cx.listener(|this, _, _, cx| this.refresh(cx));
         let store = self.store.read(cx);
+        let page = widgets::page("artist").track_focus(&self.focus);
         let Some(id) = store.id.clone() else {
-            return widgets::page("artist")
-                .track_focus(&self.focus)
-                .child(widgets::coming_soon("No artist selected", None, cx));
+            return page.child(div().h(px(360.)).child(widgets::state_panel(
+                Some(Icon::new(IconName::MicVocal)),
+                "No artist selected",
+                Some("Open an artist from Overview, a ranking or a song's page.".into()),
+                None,
+                cx,
+            )));
         };
-        let title: SharedString = store
-            .history
-            .data
-            .as_ref()
-            .map(|data| SharedString::from(data.artist.name.clone()))
-            .unwrap_or_else(|| "Artist".into());
-        let body = widgets::remote_view(
-            "artist-retry",
-            &store.history,
-            "Loading artist…",
-            retry,
+
+        let data = store.history.data.as_ref();
+        let title = artist_title(data.map(|d| d.artist.name.as_str()), &id);
+        // The Worker resolves a `name:` placeholder to a real id when it can.
+        let spotify = data
+            .and_then(|d| d.artist.id.as_deref())
+            .and_then(artist_url)
+            .or_else(|| artist_url(&id));
+        let subtitle: SharedString = if store.history.loading && data.is_some() {
+            "Artist · all time · refreshing…".into()
+        } else {
+            "Artist · all time".into()
+        };
+        let header = widgets::page_header(title, Some(subtitle), spotify.map(open_in_spotify), cx);
+
+        page.child(header)
+            .child(body(&store.history, "artist-retry", retry, cx, |data| {
+                render_history(data, cx)
+            }))
+    }
+}
+
+/// A store's three states inside a scrolling page: the shared loading and
+/// error panels at a fixed height until the first answer, then the content,
+/// under a retry banner when a later refresh failed.
+pub(crate) fn body<T>(
+    remote: &Remote<T>,
+    id: &'static str,
+    on_retry: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    cx: &App,
+    content: impl FnOnce(&T) -> AnyElement,
+) -> AnyElement {
+    match (&remote.data, &remote.error) {
+        (Some(data), error) => v_flex()
+            .gap_4()
+            .when_some(error.as_ref(), |this, error| {
+                this.child(widgets::error_banner(id, error, on_retry, cx))
+            })
+            .child(content(data))
+            .into_any_element(),
+        (None, _) => div()
+            .h(px(360.))
+            .child(widgets::remote_view(
+                id,
+                remote,
+                "Loading…",
+                on_retry,
+                cx,
+                |_| div().into_any_element(),
+            ))
+            .into_any_element(),
+    }
+}
+
+fn render_history(data: &ArtistHistory, cx: &App) -> AnyElement {
+    if data.plays == 0 {
+        return div()
+            .h(px(320.))
+            .child(widgets::state_panel(
+                Some(Icon::new(IconName::Inbox)),
+                "No plays for this artist",
+                Some("The warehouse has no plays where this artist is the primary artist.".into()),
+                None,
+                cx,
+            ))
+            .into_any_element();
+    }
+    let top = data.top_tracks.first().map_or(0, |t| t.plays).max(1) as f32;
+    let songs = data.top_tracks.iter().enumerate().map(|(ix, song)| {
+        let row = widgets::RankedRow::new(("artist-song", ix), song.name.clone())
+            .rank(ix + 1)
+            .art(widgets::album_art(song.image.as_deref(), px(32.), cx))
+            .value(widgets::count(song.plays.into()))
+            .share(song.plays as f32 / top);
+        match &song.id {
+            Some(id) => row.on_click_action(OpenTrack::new(id.clone())),
+            None => row,
+        }
+    });
+    v_flex()
+        .gap_4()
+        .child(stat_tiles(
+            data.plays,
+            data.minutes,
+            data.first_played.as_deref(),
+            data.last_played.as_deref(),
             cx,
-            |data| {
-                let summary = format!(
-                    "{} plays, {} listened, {} top songs",
-                    widgets::count(data.plays.into()),
-                    widgets::minutes(data.minutes.into()),
-                    data.top_tracks.len()
-                );
-                widgets::coming_soon("The artist page is on its way", Some(summary.into()), cx)
-                    .into_any_element()
-            },
+        ))
+        .child(months_card("artist-months", &data.months, cx))
+        .when(!data.top_tracks.is_empty(), |this| {
+            this.child(
+                widgets::card("Most-played songs · click a song for its page", cx)
+                    .child(v_flex().gap_1().children(songs)),
+            )
+        })
+        .into_any_element()
+}
+
+/// Plays, minutes, first and last play: the row both the Artist and Track
+/// pages open with.
+pub(crate) fn stat_tiles(
+    plays: u32,
+    minutes: u32,
+    first: Option<&str>,
+    last: Option<&str>,
+    cx: &App,
+) -> impl IntoElement {
+    let when = |iso: Option<&str>| match iso.and_then(|iso| played_on(iso, &chrono::Local)) {
+        Some((day, time)) => (SharedString::from(day), Some(SharedString::from(time))),
+        None => ("—".into(), None),
+    };
+    let (first_day, first_time) = when(first);
+    let (last_day, last_time) = when(last);
+    // Tiles with a detail line are taller; keep the row even.
+    h_flex()
+        .gap_3()
+        .items_stretch()
+        .child(widgets::stat_tile(
+            "Plays",
+            widgets::count(plays.into()),
+            None,
+            cx,
+        ))
+        .child(widgets::stat_tile(
+            "Listening time",
+            widgets::minutes(minutes.into()),
+            Some("Estimated; skips count for nothing".into()),
+            cx,
+        ))
+        .child(widgets::stat_tile("First play", first_day, first_time, cx))
+        .child(widgets::stat_tile("Last play", last_day, last_time, cx))
+}
+
+/// The Worker's plays per month, quiet months included, as a bar chart.
+pub(crate) fn months_card(id: &'static str, months: &[MonthCount], cx: &App) -> AnyElement {
+    let card = widgets::card("Plays per month", cx);
+    if months.is_empty() {
+        return card.into_any_element();
+    }
+    card.h(px(280.))
+        // The last band label is centred on the final bar and would
+        // otherwise be clipped by the card edge, as on Overview.
+        .child(div().flex_1().min_h_0().pr_6().child(widgets::bar_chart(
+            id,
+            month_points(months),
+            "Plays",
+            cx,
+        )))
+        .into_any_element()
+}
+
+pub(crate) fn open_in_spotify(url: String) -> AnyElement {
+    Button::new("open-in-spotify")
+        .small()
+        .primary()
+        .icon(IconName::ExternalLink)
+        .label("Open in Spotify")
+        .on_click(move |_, _, cx| cx.open_url(&url))
+        .into_any_element()
+}
+
+fn month_points(months: &[MonthCount]) -> Vec<(SharedString, f64)> {
+    months
+        .iter()
+        .map(|m| (widgets::month_label(&m.month).into(), m.plays.into()))
+        .collect()
+}
+
+/// An ISO 8601 instant as a local day and time: `("16 Jul 2017", "16:32")`.
+pub(crate) fn played_on<Tz: TimeZone>(iso: &str, tz: &Tz) -> Option<(String, String)>
+where
+    Tz::Offset: std::fmt::Display,
+{
+    let at = DateTime::parse_from_rfc3339(iso).ok()?.with_timezone(tz);
+    Some((
+        at.format("%-d %b %Y").to_string(),
+        at.format("%H:%M").to_string(),
+    ))
+}
+
+/// A Spotify web link for a real artist id; `name:` placeholders have no page.
+/// Web rather than `spotify:` so it works with or without the desktop app.
+fn artist_url(id: &str) -> Option<String> {
+    is_spotify_id(id).then(|| format!("https://open.spotify.com/artist/{id}"))
+}
+
+/// Spotify ids are base62, which also rules out `name:` placeholders.
+pub(crate) fn is_spotify_id(id: &str) -> bool {
+    !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric())
+}
+
+/// The Worker's name for the artist, else the name inside a `name:`
+/// placeholder (lower-cased by the Worker, but better than nothing).
+fn artist_title(name: Option<&str>, id: &str) -> SharedString {
+    match name.filter(|n| !n.is_empty()) {
+        Some(name) => name.to_owned().into(),
+        None => match id.strip_prefix(ARTIST_NAME_PREFIX) {
+            Some(name) if !name.is_empty() => name.to_owned().into(),
+            _ => "Artist".into(),
+        },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::FixedOffset;
+
+    #[test]
+    fn instants_read_in_the_local_zone() {
+        let singapore = FixedOffset::east_opt(8 * 3600).unwrap();
+        assert_eq!(
+            played_on("2017-07-16T16:32:15.000Z", &singapore),
+            Some(("17 Jul 2017".into(), "00:32".into()))
         );
-        widgets::page("artist")
-            .track_focus(&self.focus)
-            .child(widgets::page_header(title, Some(id), None, cx))
-            .child(div().h(px(320.)).child(body))
+        assert_eq!(played_on("not a date", &singapore), None);
+    }
+
+    #[test]
+    fn only_real_ids_link_to_spotify() {
+        assert_eq!(
+            artist_url("2YZyLoL8N0Wb9xBt1NhZWg").as_deref(),
+            Some("https://open.spotify.com/artist/2YZyLoL8N0Wb9xBt1NhZWg")
+        );
+        assert_eq!(artist_url("name:kendrick lamar"), None);
+        assert_eq!(artist_url(""), None);
+    }
+
+    #[test]
+    fn title_falls_back_to_the_placeholder_name() {
+        assert_eq!(artist_title(Some("SZA"), "abc").as_ref(), "SZA");
+        assert_eq!(
+            artist_title(Some(""), "name:kendrick lamar").as_ref(),
+            "kendrick lamar"
+        );
+        assert_eq!(
+            artist_title(None, "2YZyLoL8N0Wb9xBt1NhZWg").as_ref(),
+            "Artist"
+        );
+    }
+
+    #[test]
+    fn months_become_distinct_chart_labels() {
+        let months = [
+            MonthCount {
+                month: "2025-12".into(),
+                plays: 0,
+            },
+            MonthCount {
+                month: "2026-01".into(),
+                plays: 7,
+            },
+        ];
+        let points = month_points(&months);
+        assert_eq!(points[0], ("Dec 2025".into(), 0.));
+        assert_eq!(points[1], ("Jan 2026".into(), 7.));
     }
 }
