@@ -60,9 +60,9 @@ impl TableDelegate for ArtistsTable {
 
     fn column(&self, col_ix: usize, _: &App) -> Column {
         match col_ix {
-            0 => Column::new("rank", "#").width(px(44.)).text_right(),
-            1 => Column::new("artist", "Artist").width(px(200.)),
-            _ => Column::new("plays", "Plays").width(px(160.)),
+            0 => Column::new("rank", "#").width(px(40.)).text_right(),
+            1 => Column::new("artist", "Artist").width(px(150.)),
+            _ => Column::new("plays", "Plays").width(px(110.)),
         }
     }
 
@@ -464,16 +464,15 @@ impl OverviewView {
                     )
                     .into_any_element();
                 }
-                // The Worker sorts by plays, so the first row is the scale.
-                let top = response.tracks[0].plays.max(1) as f32;
+                // No share bar: in a third of the window it would squeeze
+                // the titles, which matter more than a second scale.
                 let rows = response.tracks.iter().enumerate().map(|(ix, song)| {
                     let art = widgets::album_art(song.image.as_deref(), px(32.), cx);
                     let row = widgets::RankedRow::new(("top-song", ix), song.name.clone())
                         .rank(ix + 1)
                         .art(art)
                         .when_some(song.artist.clone(), |row, artist| row.subtitle(artist))
-                        .value(widgets::count(song.plays.into()))
-                        .share(song.plays as f32 / top);
+                        .value(widgets::count(song.plays.into()));
                     match &song.id {
                         Some(id) => row.on_click_action(OpenTrack::new(id.clone())),
                         None => row,
@@ -675,7 +674,7 @@ impl Render for OverviewView {
                             if artists_loading_more {
                                 "Top artists · refreshing…"
                             } else {
-                                "Top artists · double-click for an artist's page"
+                                "Top artists · double-click to open"
                             },
                             cx,
                         )
@@ -688,7 +687,7 @@ impl Render for OverviewView {
                             if tracks_refreshing {
                                 "Top songs · refreshing…"
                             } else {
-                                "Top songs · click for a song's page"
+                                "Top songs · click to open"
                             },
                             cx,
                         )
@@ -698,7 +697,7 @@ impl Render for OverviewView {
                     )
                     .child(
                         div()
-                            .w(px(340.))
+                            .w(px(300.))
                             .h_full()
                             .child(self.render_spotify_top(cx)),
                     ),
