@@ -173,8 +173,10 @@ example: it once filtered only loaded rows, and now sends `q` to
 ## Layout
 
 - `src/api.rs`: HTTP client for every Worker read route, error classification, URL rules
-- `src/models.rs`: response shapes, modelled on the Worker's `main` and lenient
-  (every field defaults) so older and newer Workers still decode. Fixtures in
+- `src/models.rs`: response shapes, modelled on the Worker's `main`. A
+  response's own fields that the Worker has always sent are required, so a
+  rename fails as "Unexpected response"; fields added later and the fields of
+  rows default, so an older Worker still decodes. Fixtures in
   `tests/fixtures/`, see its NOTES.md
 - `src/config.rs`: config file and Keychain
 - `src/signin.rs`: Sign in with Spotify (PKCE, loopback redirect, code exchange)

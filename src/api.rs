@@ -1295,7 +1295,10 @@ mod tests {
         assert!(wrapped.discoveries.top[0].id.is_some());
         // A summary computed before the ids were added still decodes.
         let old: Wrapped = decode(
-            r#"{"top_songs":[{"name":"DNA.","artist":"Kendrick Lamar","plays":1}],"months":[{"month":"2025-01","top_artist":"x"}]}"#,
+            r#"{"range":{},"totals":{},"biggest_day":null,"hours":[],"weekdays":[],
+                "top_artists":[],"top_albums":[],"discoveries":{},"listening_age":null,
+                "streak":null,"top_songs":[{"name":"DNA.","artist":"Kendrick Lamar","plays":1}],
+                "months":[{"month":"2025-01","top_artist":"x"}]}"#,
         )
         .unwrap();
         assert_eq!(old.top_songs[0].track_id, None);
