@@ -20,7 +20,7 @@ gpui-kit-assets = "=0.7.1"
 base64 = "0.22"
 chrono = "0.4.45"
 dirs = "7"
-getrandom = "0.3"
+getrandom = "0.4"
 iana-time-zone = "0.1.65"
 keyring = "4.2"
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
