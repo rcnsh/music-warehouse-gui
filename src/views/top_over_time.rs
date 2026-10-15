@@ -15,7 +15,7 @@ use gpui_component::{
 };
 use gpui_kit_assets::IconName;
 
-use crate::actions::OpenArtist;
+use crate::actions::{OpenArtist, OpenTrack};
 use crate::api::ApiClient;
 use crate::models::{Leader, Period, TopOverTime};
 use crate::state::top_over_time::TopOverTimeStore;
@@ -184,14 +184,14 @@ fn period_section(ix: usize, period: &Period, cx: &App) -> AnyElement {
                 .share(artist.share as f32)
                 .on_click_action(OpenArtist::by_name(&artist.name))
             }));
-    // The Worker sends no track id here, so a song opens its artist.
+    // A Worker too old to send track ids gets the song's artist instead.
     let tracks =
         v_flex()
             .flex_1()
             .min_w_0()
             .gap_0p5()
             .children(period.tracks.iter().enumerate().map(|(i, track)| {
-                widgets::RankedRow::new(
+                let row = widgets::RankedRow::new(
                     SharedString::from(format!("p{ix}-track-{i}")),
                     track.name.clone(),
                 )
@@ -199,8 +199,11 @@ fn period_section(ix: usize, period: &Period, cx: &App) -> AnyElement {
                 .art(widgets::album_art(track.image.as_deref(), px(32.), cx))
                 .subtitle(track.artist.clone())
                 .value(widgets::count(track.plays.into()))
-                .share(track.plays as f32 / top_track)
-                .on_click_action(OpenArtist::by_name(&track.artist))
+                .share(track.plays as f32 / top_track);
+                match &track.track_id {
+                    Some(id) => row.on_click_action(OpenTrack::new(id.clone())),
+                    None => row.on_click_action(OpenArtist::by_name(&track.artist)),
+                }
             }));
     v_flex()
         .gap_2()
