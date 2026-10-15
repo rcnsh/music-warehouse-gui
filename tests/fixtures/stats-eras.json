@@ -1,0 +1,33 @@
+{
+  "as_of": "2026-10-01T00:00:00.000Z",
+  "latest_era": { "key": "city-b", "label": "City B" },
+  "previous_era": { "key": "city-a", "label": "City A" },
+  "move_month": "2026-06",
+  "window_months": 3,
+  "latest": { "from": "2026-07", "to": "2026-09" },
+  "before": { "from": "2026-03", "to": "2026-05" },
+  "ready": true,
+  "summary": {
+    "known_artist_share": 0.812,
+    "new_artists": 41,
+    "artists": 187,
+    "change": 0.433,
+    "typical_change": { "median": 0.38, "min": 0.21, "max": 0.61, "windows": 27, "exceeded_by": 9 }
+  },
+  "top": {
+    "earlier": [
+      { "artist": "Kendrick Lamar", "share": 0.061 },
+      { "artist": "Kanye West", "share": 0.048 }
+    ],
+    "before": [
+      { "artist": "Twenty One Pilots", "share": 0.092 },
+      { "artist": "Kendrick Lamar", "share": 0.051 }
+    ],
+    "latest": [
+      { "artist": "Kendrick Lamar", "share": 0.104 },
+      { "artist": "Kanye West", "share": 0.07 }
+    ]
+  },
+  "risers": [{ "artist": "Kendrick Lamar", "before": 0.051, "after": 0.104 }],
+  "fallers": [{ "artist": "Twenty One Pilots", "before": 0.092, "after": 0.031 }]
+}

@@ -9,7 +9,8 @@ stores plays and computes aggregates; this app fetches and renders them.
 config.json + Keychain ──> AppRoot ──> SetupView      (no config or token)
                                   └──> Shell          (configured)
                                         ├─ HistoryView  ── HistoryStore  ─┐
-                                        ├─ OverviewView ── OverviewStore ─┼─> ApiClient ──> Tokio runtime ──> Worker /api/*
+                                        ├─ OverviewView ── OverviewStore ─┤
+                                        ├─ <Page>View   ── <Page>Store   ─┼─> ApiClient ──> Tokio runtime ──> Worker /api/*
                                         └─ NowPlayingStrip ── NowPlayingStore ┘
 ```
 
@@ -17,9 +18,12 @@ config.json + Keychain ──> AppRoot ──> SetupView      (no config or toke
    on a background task, builds one `ApiClient`, then shows setup or the main
    shell. Setup emits a new client once it has validated and saved the URL
    and token.
-2. `views/shell.rs` hands the client to History and Overview, which create
-   their stores, and creates the `NowPlayingStore` itself.
-   The shell owns the tab bar, command palette and visibility handling.
+2. `views/shell.rs` hands the client to every page view, which create
+   their stores, and creates the `NowPlayingStore` itself. The shell owns
+   the sidebar, the Back stack, the command palette and visibility handling.
+   Pages other than History and Overview fetch nothing until first shown.
+   Views navigate by dispatching actions (`ShowRhythm`, `OpenArtist { id }`),
+   which the shell handles.
 3. Stores in `src/state/` own fetched data. Views observe them and render;
    views never call the API directly.
 4. Requests run on a small Tokio runtime (`runtime.rs`). GPUI tasks await the
@@ -42,8 +46,10 @@ config.json + Keychain ──> AppRoot ──> SetupView      (no config or toke
 | `src/state/history.rs` | `HistoryStore`: pages of 200 with `before`, new plays with `after`, jump-to-date anchor |
 | `src/state/overview.rs` | `OverviewStore`: daily counts and top artists for one range, Spotify top lists separately |
 | `src/state/now_playing.rs` | `NowPlayingStore`: 20 s / 30 s polling, exponential backoff, `Retry-After` capped at an hour |
-| `src/state/mod.rs` | `Remote<T>`: keeps last good data through a failed refresh |
-| `src/views/` | One file per view; `widgets.rs` has shared loading, empty and error states |
+| `src/state/<page>.rs` | One store per page (artist, track, albums, wrapped, on_repeat, on_this_day, rhythm, top_over_time, eras, concerts) |
+| `src/state/mod.rs` | `Remote<T>`: keeps last good data through a failed refresh; `fetch` runs a request into one |
+| `src/views/nav.rs` | Pages (`Section`, `Page`), sidebar groups, labels, icons, shortcuts, Back stack |
+| `src/views/` | One file per view; `widgets.rs` has shared states and page building blocks |
 | `src/dev_capture.rs` | `dev-capture` feature only: render window to PNG on request |
 | `tests/fixtures/` | Captured and hand-written API responses used by unit tests (see `NOTES.md`) |
 | `scripts/bundle-macos.sh` | Builds, ad-hoc signs and zips `Music Warehouse.app` |

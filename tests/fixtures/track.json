@@ -1,0 +1,18 @@
+{
+  "track": {
+    "id": "67XC51nlZncNpHmZ8rOU9a",
+    "name": "We Cry Together",
+    "artist": "Kendrick Lamar",
+    "image": "https://i.scdn.co/image/ab67616d0000b2732e02117d76426a08ac7c174f"
+  },
+  "plays": 6,
+  "minutes": 28,
+  "first_played": "2026-10-06T18:55:48.427Z",
+  "last_played": "2026-10-15T08:08:14.684Z",
+  "months": [
+    {
+      "month": "2026-10",
+      "plays": 6
+    }
+  ]
+}

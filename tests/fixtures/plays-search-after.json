@@ -1,0 +1,44 @@
+{
+  "q": "kendrick",
+  "plays": [
+    {
+      "played_at_ms": 1792053358853,
+      "track_id": "1QPreu0BNOrUfEb8HTd2qG",
+      "context_uri": "spotify:album:79ONNoS4M9tfIA1mYLBYVX",
+      "context_type": "album",
+      "source": "api",
+      "track_name": "Rich Spirit",
+      "duration_ms": 202285,
+      "isrc": "USUM72208971",
+      "album_name": "Mr. Morale & The Big Steppers",
+      "image_url": "https://i.scdn.co/image/ab67616d0000b2732e02117d76426a08ac7c174f",
+      "artists": "Kendrick Lamar"
+    },
+    {
+      "played_at_ms": 1792053156484,
+      "track_id": "15pyFQHCTVp6T7vaWctSgO",
+      "context_uri": "spotify:album:79ONNoS4M9tfIA1mYLBYVX",
+      "context_type": "album",
+      "source": "api",
+      "track_name": "Rich - Interlude",
+      "duration_ms": 103319,
+      "isrc": "USUM72208970",
+      "album_name": "Mr. Morale & The Big Steppers",
+      "image_url": "https://i.scdn.co/image/ab67616d0000b2732e02117d76426a08ac7c174f",
+      "artists": "Kendrick Lamar"
+    },
+    {
+      "played_at_ms": 1792053053173,
+      "track_id": "28qA8y1sz0FTuSapsCxNOG",
+      "context_uri": "spotify:album:79ONNoS4M9tfIA1mYLBYVX",
+      "context_type": "album",
+      "source": "api",
+      "track_name": "Father Time (feat. Sampha)",
+      "duration_ms": 222497,
+      "isrc": "USUM72208968",
+      "album_name": "Mr. Morale & The Big Steppers",
+      "image_url": "https://i.scdn.co/image/ab67616d0000b2732e02117d76426a08ac7c174f",
+      "artists": "Kendrick Lamar, Sampha"
+    }
+  ]
+}

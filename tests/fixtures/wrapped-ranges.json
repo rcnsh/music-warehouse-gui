@@ -1,0 +1,25 @@
+{
+  "ranges": [
+    {
+      "from": "2026-01-01",
+      "to": "2026-10-11",
+      "label": "2026 so far",
+      "kind": "year_to_date",
+      "computed": false
+    },
+    {
+      "from": "2025-01-01",
+      "to": "2025-12-31",
+      "label": "2025",
+      "kind": "year",
+      "computed": true
+    },
+    {
+      "from": "2024-01-01",
+      "to": "2024-12-31",
+      "label": "2024",
+      "kind": "year",
+      "computed": true
+    }
+  ]
+}

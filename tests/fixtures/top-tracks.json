@@ -1,0 +1,28 @@
+{
+  "from": "2026-09-01",
+  "to": "2026-09-30",
+  "tz": "Europe/London",
+  "tracks": [
+    {
+      "id": "1UGD3lW3tDmgZfAVDh6w7r",
+      "name": "Devil In A New Dress",
+      "artist": "Kanye West",
+      "plays": 26,
+      "image": "https://i.scdn.co/image/ab67616d0000b273d9194aa18fa4c9362b47464f"
+    },
+    {
+      "id": "6HZILIRieu8S0iqY8kIKhj",
+      "name": "DNA.",
+      "artist": "Kendrick Lamar",
+      "plays": 25,
+      "image": "https://i.scdn.co/image/ab67616d0000b2738b52c6b9bc4e43d873869699"
+    },
+    {
+      "id": "6K07Ahf6V7CAQn0ikrOztl",
+      "name": "So Appalled",
+      "artist": "Kanye West",
+      "plays": 25,
+      "image": "https://i.scdn.co/image/ab67616d0000b273d9194aa18fa4c9362b47464f"
+    }
+  ]
+}

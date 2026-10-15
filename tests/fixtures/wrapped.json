@@ -1,0 +1,155 @@
+{
+  "range": {
+    "from": "2025-01-01",
+    "to": "2025-12-31",
+    "days": 365
+  },
+  "computed_at": "2026-01-02T03:00:00.000Z",
+  "totals": {
+    "minutes": 41230,
+    "plays": 12034,
+    "skips": 2210,
+    "days_listened": 351,
+    "artists": 1204,
+    "songs": 3870
+  },
+  "biggest_day": {
+    "date": "2025-08-14",
+    "minutes": 512
+  },
+  "hours": [
+    825,
+    2680,
+    1608,
+    536,
+    2433,
+    1361,
+    289,
+    2144,
+    1072,
+    0,
+    1897,
+    825,
+    2680,
+    1608,
+    536,
+    2433,
+    1361,
+    289,
+    3505,
+    2433,
+    1361,
+    3216,
+    2144,
+    4041
+  ],
+  "weekdays": [
+    6100,
+    5900,
+    5800,
+    6050,
+    6400,
+    5600,
+    5380
+  ],
+  "top_artists": [
+    {
+      "name": "Kendrick Lamar",
+      "minutes": 3010,
+      "plays": 700,
+      "share": 0.073,
+      "days": 140,
+      "longest_run_days": 12,
+      "top_song": "DNA.",
+      "image": "https://i.scdn.co/image/ab67616d0000b2738b52c6b9bc4e43d873869699"
+    },
+    {
+      "name": "Kanye West",
+      "minutes": 2400,
+      "plays": 610,
+      "share": 0.058,
+      "days": 120,
+      "longest_run_days": 6,
+      "top_song": null,
+      "image": null
+    }
+  ],
+  "top_songs": [
+    {
+      "name": "DNA.",
+      "artist": "Kendrick Lamar",
+      "album": "DAMN.",
+      "image": "https://i.scdn.co/image/ab67616d0000b2738b52c6b9bc4e43d873869699",
+      "plays": 149,
+      "minutes": 461,
+      "peak_month": "2025-08",
+      "first_played": "2025-01-03"
+    }
+  ],
+  "top_albums": [
+    {
+      "name": "DAMN.",
+      "artist": "Kendrick Lamar",
+      "image": "https://i.scdn.co/image/ab67616d0000b2738b52c6b9bc4e43d873869699",
+      "plays": 612,
+      "minutes": 1980,
+      "songs": 14
+    }
+  ],
+  "months": [
+    {
+      "month": "2025-01",
+      "minutes": 3300,
+      "top_artist": "Kendrick Lamar",
+      "top_song": "DNA.",
+      "image": "https://i.scdn.co/image/ab67616d0000b2738b52c6b9bc4e43d873869699"
+    },
+    {
+      "month": "2025-02",
+      "minutes": 2900,
+      "top_artist": null,
+      "top_song": null,
+      "image": null
+    }
+  ],
+  "discoveries": {
+    "artists": 312,
+    "songs": 1406,
+    "share": 0.142,
+    "top": [
+      {
+        "name": "Vierre Cloud",
+        "minutes": 410,
+        "image": null
+      }
+    ]
+  },
+  "listening_age": {
+    "age": 24,
+    "median_year": 2016,
+    "window": [
+      2015,
+      2019
+    ],
+    "coverage": 0.91,
+    "decades": [
+      {
+        "decade": 2000,
+        "share": 0.12
+      },
+      {
+        "decade": 2010,
+        "share": 0.61
+      },
+      {
+        "decade": 2020,
+        "share": 0.27
+      }
+    ]
+  },
+  "streak": {
+    "days": 64,
+    "from": "2025-06-01",
+    "to": "2025-08-03"
+  }
+}

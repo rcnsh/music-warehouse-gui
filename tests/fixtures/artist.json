@@ -1,0 +1,56 @@
+{
+  "artist": {
+    "id": "2YZyLoL8N0Wb9xBt1NhZWg",
+    "name": "Kendrick Lamar"
+  },
+  "plays": 1199,
+  "minutes": 4962,
+  "first_played": "2017-07-16T16:32:15.000Z",
+  "last_played": "2026-10-15T08:35:58.853Z",
+  "months": [
+    {
+      "month": "2026-05",
+      "plays": 0
+    },
+    {
+      "month": "2026-06",
+      "plays": 3
+    },
+    {
+      "month": "2026-07",
+      "plays": 4
+    },
+    {
+      "month": "2026-08",
+      "plays": 52
+    },
+    {
+      "month": "2026-09",
+      "plays": 485
+    },
+    {
+      "month": "2026-10",
+      "plays": 632
+    }
+  ],
+  "top_tracks": [
+    {
+      "id": "6HZILIRieu8S0iqY8kIKhj",
+      "name": "DNA.",
+      "plays": 39,
+      "image": "https://i.scdn.co/image/ab67616d0000b2738b52c6b9bc4e43d873869699"
+    },
+    {
+      "id": "0yhMmqax6HRAZxI7udEask",
+      "name": "Bitch, Don’t Kill My Vibe",
+      "plays": 37,
+      "image": "https://i.scdn.co/image/ab67616d0000b2732cd55246d935a8a77cb4859e"
+    },
+    {
+      "id": "74tLlkN3rgVzRqQJgPfink",
+      "name": "Money Trees",
+      "plays": 37,
+      "image": "https://i.scdn.co/image/ab67616d0000b2732cd55246d935a8a77cb4859e"
+    }
+  ]
+}

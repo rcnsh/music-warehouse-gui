@@ -174,7 +174,7 @@ impl SetupView {
                 if client.token_is_admin().await? {
                     return Ok(None);
                 }
-                client.plays(1, None, None).await.map(Some)
+                client.plays(1, None, None, None).await.map(Some)
             })
             .await;
             this.update(cx, |this, cx| {

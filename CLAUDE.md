@@ -36,7 +36,8 @@ instead: `MWGUI_DEV_TOKEN_FILE=~/dev/music-warehouse/.dev.vars`. Only the
 
 `cargo run --features dev-capture` with `MWGUI_CAPTURE_DIR=/some/dir` set makes
 the app watch `<dir>/request`; writing `capture <name>` renders the window to
-`<dir>/<name>.png`, and `action mwgui::ShowOverview` dispatches an action. See
+`<dir>/<name>.png`, `action mwgui::ShowOverview` dispatches an action, and
+`artist <id>` / `track <id>` open those pages. See
 `src/dev_capture.rs`. It relies on GPUI's `test-support` feature, so it is never
 part of a normal build.
 
@@ -149,15 +150,41 @@ example: it once filtered only loaded rows, and now sends `q` to
 
 ## Layout
 
-- `src/api.rs`: HTTP client, error classification, URL rules
-- `src/models.rs`: response shapes (fixtures in `tests/fixtures/`, see its NOTES.md)
+- `src/api.rs`: HTTP client for every Worker read route, error classification, URL rules
+- `src/models.rs`: response shapes, modelled on the Worker's `main` and lenient
+  (every field defaults) so older and newer Workers still decode. Fixtures in
+  `tests/fixtures/`, see its NOTES.md
 - `src/config.rs`: config file and Keychain
 - `src/signin.rs`: Sign in with Spotify (PKCE, loopback redirect, code exchange)
 - `src/dates.rs`: range presets and custom-range parsing in the system timezone
 - `src/runtime.rs`: Tokio runtime that reqwest runs on; GPUI tasks await its handles
-- `src/state/`: entities that own fetched data (history paging, overview, now-playing poller)
-- `src/views/`: one file per view; `widgets.rs` holds shared loading/empty/error states
-- `src/actions.rs`: actions, keybindings, menus
+- `src/state/`: entities that own fetched data, one module per page;
+  `state::fetch` runs a request into a `Remote<T>`
+- `src/views/`: one file per view. `nav.rs` names the pages (`Section`, `Page`,
+  sidebar `GROUPS`, Back stack); `shell.rs` holds every page view, the sidebar
+  and top bar; `widgets.rs` holds shared states and page building blocks
+- `src/actions.rs`: actions (including `OpenArtist { id }` / `OpenTrack { id }`,
+  dispatchable from any view), keybindings, menus
+
+### Page ownership
+
+Each page is one view and one store: `src/views/<page>.rs` and
+`src/state/<page>.rs` for `artist`, `track`, `albums`, `wrapped`, `on_repeat`,
+`on_this_day`, `rhythm`, `top_over_time`, `eras`, `concerts`. A page PR edits
+only its own two files. The shell calls `XView::new(client, window, cx)`,
+`activate(window, cx)` each time the page is shown (load on the first),
+`refresh(cx)` on ⌘R, and `Focusable::focus_handle`; Artist and Track also
+get `set_artist(id, cx)` / `set_track(id, cx)` before `activate`. A view's
+root element must `track_focus` its focus handle, or actions dispatched while
+it is showing never reach the shell. Shared files (`api.rs`, `models.rs`,
+`actions.rs`, `views/{shell,nav,mod,widgets,root}.rs`, `state/mod.rs`,
+`main.rs`, `tests/fixtures/`, `Cargo.toml`) change in their own PRs.
+
+To navigate from a page, dispatch an action rather than calling the shell:
+`window.dispatch_action(Box::new(OpenArtist::new(id)), cx)`, or give a
+`widgets::RankedRow` an action. Stats that name an artist without an id use
+`OpenArtist::by_name(name)`; the client sends the `name:` placeholder and its
+name, and the Worker folds it into the real artist.
 
 ## Conventions
 

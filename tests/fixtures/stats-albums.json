@@ -1,0 +1,65 @@
+{
+  "as_of": "2026-10-12T00:00:00.000Z",
+  "min_songs": 4,
+  "albums": [
+    {
+      "name": "DAMN.",
+      "artist": "Kendrick Lamar",
+      "image": "https://i.scdn.co/image/ab67616d0000b2738b52c6b9bc4e43d873869699",
+      "plays": 612,
+      "songs": 14,
+      "from": "2017-07",
+      "to": "2026-10"
+    },
+    {
+      "name": "My Beautiful Dark Twisted Fantasy",
+      "artist": "Kanye West",
+      "image": "https://i.scdn.co/image/ab67616d0000b273d9194aa18fa4c9362b47464f",
+      "plays": 488,
+      "songs": 13,
+      "from": "2017-07",
+      "to": "2026-10"
+    }
+  ],
+  "years": [
+    {
+      "year": "2025",
+      "partial": false,
+      "albums": [
+        {
+          "name": "My Beautiful Dark Twisted Fantasy",
+          "artist": "Kanye West",
+          "image": "https://i.scdn.co/image/ab67616d0000b273d9194aa18fa4c9362b47464f",
+          "plays": 488,
+          "songs": 13,
+          "from": "2017-07",
+          "to": "2026-10"
+        }
+      ]
+    },
+    {
+      "year": "2026",
+      "partial": true,
+      "albums": [
+        {
+          "name": "DAMN.",
+          "artist": "Kendrick Lamar",
+          "image": "https://i.scdn.co/image/ab67616d0000b2738b52c6b9bc4e43d873869699",
+          "plays": 612,
+          "songs": 14,
+          "from": "2017-07",
+          "to": "2026-10"
+        },
+        {
+          "name": "My Beautiful Dark Twisted Fantasy",
+          "artist": "Kanye West",
+          "image": null,
+          "plays": 488,
+          "songs": 13,
+          "from": "2017-07",
+          "to": "2026-10"
+        }
+      ]
+    }
+  ]
+}

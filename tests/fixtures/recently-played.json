@@ -1,0 +1,183 @@
+{
+  "items": [
+    {
+      "track": {
+        "album": {
+          "album_type": "album",
+          "artists": [
+            {
+              "external_urls": {
+                "spotify": "https://open.spotify.com/artist/2YZyLoL8N0Wb9xBt1NhZWg"
+              },
+              "href": "https://api.spotify.com/v1/artists/2YZyLoL8N0Wb9xBt1NhZWg",
+              "id": "2YZyLoL8N0Wb9xBt1NhZWg",
+              "name": "Kendrick Lamar",
+              "type": "artist",
+              "uri": "spotify:artist:2YZyLoL8N0Wb9xBt1NhZWg"
+            }
+          ],
+          "external_urls": {
+            "spotify": "https://open.spotify.com/album/79ONNoS4M9tfIA1mYLBYVX"
+          },
+          "href": "https://api.spotify.com/v1/albums/79ONNoS4M9tfIA1mYLBYVX",
+          "id": "79ONNoS4M9tfIA1mYLBYVX",
+          "images": [
+            {
+              "url": "https://i.scdn.co/image/ab67616d0000b2732e02117d76426a08ac7c174f",
+              "width": 640,
+              "height": 640
+            },
+            {
+              "url": "https://i.scdn.co/image/ab67616d00001e022e02117d76426a08ac7c174f",
+              "width": 300,
+              "height": 300
+            },
+            {
+              "url": "https://i.scdn.co/image/ab67616d000048512e02117d76426a08ac7c174f",
+              "width": 64,
+              "height": 64
+            }
+          ],
+          "is_playable": true,
+          "name": "Mr. Morale & The Big Steppers",
+          "release_date": "2022-05-13",
+          "release_date_precision": "day",
+          "total_tracks": 19,
+          "type": "album",
+          "uri": "spotify:album:79ONNoS4M9tfIA1mYLBYVX"
+        },
+        "artists": [
+          {
+            "external_urls": {
+              "spotify": "https://open.spotify.com/artist/2YZyLoL8N0Wb9xBt1NhZWg"
+            },
+            "href": "https://api.spotify.com/v1/artists/2YZyLoL8N0Wb9xBt1NhZWg",
+            "id": "2YZyLoL8N0Wb9xBt1NhZWg",
+            "name": "Kendrick Lamar",
+            "type": "artist",
+            "uri": "spotify:artist:2YZyLoL8N0Wb9xBt1NhZWg"
+          }
+        ],
+        "disc_number": 1,
+        "duration_ms": 202285,
+        "explicit": true,
+        "external_ids": {
+          "isrc": "USUM72208971"
+        },
+        "external_urls": {
+          "spotify": "https://open.spotify.com/track/1QPreu0BNOrUfEb8HTd2qG"
+        },
+        "href": "https://api.spotify.com/v1/tracks/1QPreu0BNOrUfEb8HTd2qG",
+        "id": "1QPreu0BNOrUfEb8HTd2qG",
+        "is_local": false,
+        "is_playable": true,
+        "name": "Rich Spirit",
+        "track_number": 7,
+        "type": "track",
+        "uri": "spotify:track:1QPreu0BNOrUfEb8HTd2qG"
+      },
+      "played_at": "2026-10-15T08:35:58.853Z",
+      "context": {
+        "type": "album",
+        "uri": "spotify:album:79ONNoS4M9tfIA1mYLBYVX",
+        "href": "https://api.spotify.com/v1/albums/79ONNoS4M9tfIA1mYLBYVX",
+        "external_urls": {
+          "spotify": "https://open.spotify.com/album/79ONNoS4M9tfIA1mYLBYVX"
+        }
+      }
+    },
+    {
+      "track": {
+        "album": {
+          "album_type": "album",
+          "artists": [
+            {
+              "external_urls": {
+                "spotify": "https://open.spotify.com/artist/2YZyLoL8N0Wb9xBt1NhZWg"
+              },
+              "href": "https://api.spotify.com/v1/artists/2YZyLoL8N0Wb9xBt1NhZWg",
+              "id": "2YZyLoL8N0Wb9xBt1NhZWg",
+              "name": "Kendrick Lamar",
+              "type": "artist",
+              "uri": "spotify:artist:2YZyLoL8N0Wb9xBt1NhZWg"
+            }
+          ],
+          "external_urls": {
+            "spotify": "https://open.spotify.com/album/79ONNoS4M9tfIA1mYLBYVX"
+          },
+          "href": "https://api.spotify.com/v1/albums/79ONNoS4M9tfIA1mYLBYVX",
+          "id": "79ONNoS4M9tfIA1mYLBYVX",
+          "images": [
+            {
+              "url": "https://i.scdn.co/image/ab67616d0000b2732e02117d76426a08ac7c174f",
+              "width": 640,
+              "height": 640
+            },
+            {
+              "url": "https://i.scdn.co/image/ab67616d00001e022e02117d76426a08ac7c174f",
+              "width": 300,
+              "height": 300
+            },
+            {
+              "url": "https://i.scdn.co/image/ab67616d000048512e02117d76426a08ac7c174f",
+              "width": 64,
+              "height": 64
+            }
+          ],
+          "is_playable": true,
+          "name": "Mr. Morale & The Big Steppers",
+          "release_date": "2022-05-13",
+          "release_date_precision": "day",
+          "total_tracks": 19,
+          "type": "album",
+          "uri": "spotify:album:79ONNoS4M9tfIA1mYLBYVX"
+        },
+        "artists": [
+          {
+            "external_urls": {
+              "spotify": "https://open.spotify.com/artist/2YZyLoL8N0Wb9xBt1NhZWg"
+            },
+            "href": "https://api.spotify.com/v1/artists/2YZyLoL8N0Wb9xBt1NhZWg",
+            "id": "2YZyLoL8N0Wb9xBt1NhZWg",
+            "name": "Kendrick Lamar",
+            "type": "artist",
+            "uri": "spotify:artist:2YZyLoL8N0Wb9xBt1NhZWg"
+          }
+        ],
+        "disc_number": 1,
+        "duration_ms": 103319,
+        "explicit": true,
+        "external_ids": {
+          "isrc": "USUM72208970"
+        },
+        "external_urls": {
+          "spotify": "https://open.spotify.com/track/15pyFQHCTVp6T7vaWctSgO"
+        },
+        "href": "https://api.spotify.com/v1/tracks/15pyFQHCTVp6T7vaWctSgO",
+        "id": "15pyFQHCTVp6T7vaWctSgO",
+        "is_local": false,
+        "is_playable": true,
+        "name": "Rich - Interlude",
+        "track_number": 6,
+        "type": "track",
+        "uri": "spotify:track:15pyFQHCTVp6T7vaWctSgO"
+      },
+      "played_at": "2026-10-15T08:32:36.484Z",
+      "context": {
+        "type": "album",
+        "uri": "spotify:album:79ONNoS4M9tfIA1mYLBYVX",
+        "href": "https://api.spotify.com/v1/albums/79ONNoS4M9tfIA1mYLBYVX",
+        "external_urls": {
+          "spotify": "https://open.spotify.com/album/79ONNoS4M9tfIA1mYLBYVX"
+        }
+      }
+    }
+  ],
+  "next": "https://api.spotify.com/v1/me/player/recently-played?before=1792053156484&limit=2",
+  "cursors": {
+    "after": "1792053358853",
+    "before": "1792053156484"
+  },
+  "limit": 2,
+  "href": "https://api.spotify.com/v1/me/player/recently-played?limit=2"
+}

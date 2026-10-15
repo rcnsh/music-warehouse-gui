@@ -1,7 +1,7 @@
 //! The ⌘K command palette: every window command, searchable by name.
 
 use gpui::AppContext as _;
-use gpui::{Action, App, ParentElement, Styled, WeakEntity, Window, px};
+use gpui::{Action, App, ParentElement, SharedString, Styled, WeakEntity, Window, px};
 use gpui_component::{
     IndexPath, WindowExt,
     command::{Command, CommandItem, CommandState},
@@ -11,12 +11,13 @@ use gpui_kit_assets::IconName;
 use crate::actions;
 use crate::appearance::Appearance;
 use crate::dates::RangePreset;
+use crate::views::nav::Section;
 use crate::views::shell::Shell;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PaletteCommand {
-    ShowHistory,
-    ShowOverview,
+    Show(Section),
+    Back,
     FindInHistory,
     GoToDate,
     BackToNewest,
@@ -27,46 +28,50 @@ pub enum PaletteCommand {
 }
 
 impl PaletteCommand {
-    pub const ALL: [Self; 13] = [
-        Self::ShowHistory,
-        Self::ShowOverview,
-        Self::FindInHistory,
-        Self::GoToDate,
-        Self::BackToNewest,
-        Self::Range(RangePreset::Last7Days),
-        Self::Range(RangePreset::Last30Days),
-        Self::Range(RangePreset::LastYear),
-        Self::Refresh,
-        Self::Settings,
-        Self::Appearance(Appearance::System),
-        Self::Appearance(Appearance::Light),
-        Self::Appearance(Appearance::Dark),
-    ];
+    /// Every page first, in sidebar order, then the other commands.
+    pub fn all() -> Vec<Self> {
+        let mut all: Vec<Self> = Section::ALL.into_iter().map(Self::Show).collect();
+        all.extend([
+            Self::Back,
+            Self::FindInHistory,
+            Self::GoToDate,
+            Self::BackToNewest,
+            Self::Range(RangePreset::Last7Days),
+            Self::Range(RangePreset::Last30Days),
+            Self::Range(RangePreset::LastYear),
+            Self::Refresh,
+            Self::Settings,
+            Self::Appearance(Appearance::System),
+            Self::Appearance(Appearance::Light),
+            Self::Appearance(Appearance::Dark),
+        ]);
+        all
+    }
 
-    fn label(self) -> &'static str {
+    fn label(self) -> SharedString {
         match self {
-            Self::ShowHistory => "Show History",
-            Self::ShowOverview => "Show Overview",
-            Self::FindInHistory => "Filter History",
-            Self::GoToDate => "Go to Date in History",
-            Self::BackToNewest => "Back to Newest Plays",
-            Self::Range(RangePreset::Last7Days) => "Overview: Last 7 Days",
-            Self::Range(RangePreset::Last30Days) => "Overview: Last 30 Days",
-            Self::Range(RangePreset::LastYear) => "Overview: Last Year",
-            Self::Range(RangePreset::Custom) => "Overview: Custom Range",
-            Self::Refresh => "Refresh",
-            Self::Settings => "Settings",
-            Self::Appearance(Appearance::System) => "Appearance: Match System",
-            Self::Appearance(Appearance::Light) => "Appearance: Light",
-            Self::Appearance(Appearance::Dark) => "Appearance: Dark",
+            Self::Show(section) => format!("Show {}", section.label()).into(),
+            Self::Back => "Back".into(),
+            Self::FindInHistory => "Filter History".into(),
+            Self::GoToDate => "Go to Date in History".into(),
+            Self::BackToNewest => "Back to Newest Plays".into(),
+            Self::Range(RangePreset::Last7Days) => "Overview: Last 7 Days".into(),
+            Self::Range(RangePreset::Last30Days) => "Overview: Last 30 Days".into(),
+            Self::Range(RangePreset::LastYear) => "Overview: Last Year".into(),
+            Self::Range(RangePreset::Custom) => "Overview: Custom Range".into(),
+            Self::Refresh => "Refresh".into(),
+            Self::Settings => "Settings".into(),
+            Self::Appearance(Appearance::System) => "Appearance: Match System".into(),
+            Self::Appearance(Appearance::Light) => "Appearance: Light".into(),
+            Self::Appearance(Appearance::Dark) => "Appearance: Dark".into(),
         }
     }
 
     /// Extra words people search by, beyond the label.
     fn keywords(self) -> &'static [&'static str] {
         match self {
-            Self::ShowHistory => &["plays", "list", "recent"],
-            Self::ShowOverview => &["chart", "stats", "artists"],
+            Self::Show(section) => section.keywords(),
+            Self::Back => &["previous", "return"],
             Self::FindInHistory => &["search", "find", "track", "album"],
             Self::GoToDate => &["jump", "day", "calendar"],
             Self::BackToNewest => &["today", "latest", "top"],
@@ -82,8 +87,10 @@ impl PaletteCommand {
 
     fn icon(self) -> IconName {
         match self {
-            Self::ShowHistory | Self::BackToNewest => IconName::Inbox,
-            Self::ShowOverview | Self::Range(_) => IconName::ChartColumn,
+            Self::Show(section) => section.icon(),
+            Self::Back => IconName::ArrowLeft,
+            Self::BackToNewest => IconName::Inbox,
+            Self::Range(_) => IconName::ChartColumn,
             Self::FindInHistory => IconName::Search,
             Self::GoToDate => IconName::Calendar,
             Self::Refresh => IconName::RefreshCw,
@@ -97,8 +104,8 @@ impl PaletteCommand {
     /// `open` for why the palette does not dispatch it.
     fn hint_action(self) -> Option<Box<dyn Action>> {
         Some(match self {
-            Self::ShowHistory => Box::new(actions::ShowHistory),
-            Self::ShowOverview => Box::new(actions::ShowOverview),
+            Self::Show(section) => section.action(),
+            Self::Back => Box::new(actions::GoBack),
             Self::FindInHistory => Box::new(actions::FocusFilter),
             Self::GoToDate => Box::new(actions::GoToDate),
             Self::Refresh => Box::new(actions::Refresh),
@@ -118,7 +125,8 @@ impl PaletteCommand {
 pub fn open(shell: WeakEntity<Shell>, window: &mut Window, cx: &mut App) {
     let state = cx.new(|cx| CommandState::new(window, cx));
     let current = crate::appearance::current(cx);
-    let items: Vec<CommandItem> = PaletteCommand::ALL
+    let commands = PaletteCommand::all();
+    let items: Vec<CommandItem> = commands
         .iter()
         .map(|command| {
             let item = CommandItem::new()
@@ -136,6 +144,7 @@ pub fn open(shell: WeakEntity<Shell>, window: &mut Window, cx: &mut App) {
     let palette_state = state.clone();
     window.open_dialog(cx, move |dialog, _, _| {
         let shell = shell.clone();
+        let commands = commands.clone();
         dialog.w(px(520.)).p_0().close_button(false).child(
             Command::new(&palette_state)
                 .items(items.clone())
@@ -143,7 +152,7 @@ pub fn open(shell: WeakEntity<Shell>, window: &mut Window, cx: &mut App) {
                 .bordered(false)
                 .on_confirm(move |ix: IndexPath, window, cx| {
                     window.close_dialog(cx);
-                    if let Some(&command) = PaletteCommand::ALL.get(ix.row) {
+                    if let Some(&command) = commands.get(ix.row) {
                         shell
                             .update(cx, |shell, cx| shell.run_command(command, window, cx))
                             .ok();
@@ -160,9 +169,9 @@ mod tests {
 
     #[test]
     fn every_command_has_a_distinct_label() {
-        let mut labels: Vec<_> = PaletteCommand::ALL.iter().map(|c| c.label()).collect();
+        let mut labels: Vec<_> = PaletteCommand::all().iter().map(|c| c.label()).collect();
         labels.sort();
         labels.dedup();
-        assert_eq!(labels.len(), PaletteCommand::ALL.len());
+        assert_eq!(labels.len(), PaletteCommand::all().len());
     }
 }

@@ -33,6 +33,9 @@ const MIN_VISIBLE: f32 = 100.;
 #[serde(default)]
 pub struct UiState {
     pub window: Option<SavedWindow>,
+    /// The last sidebar page. Artist and Track pages are not saved: they
+    /// leave the page they were opened from in place.
+    #[serde(deserialize_with = "lenient_page")]
     pub page: Option<SavedPage>,
     pub range: Option<SavedRange>,
     /// Spotify's `time_range` value, e.g. `short_term`.
@@ -45,6 +48,23 @@ pub struct UiState {
 pub enum SavedPage {
     History,
     Overview,
+    OnRepeat,
+    OnThisDay,
+    Albums,
+    TopOverTime,
+    Rhythm,
+    Eras,
+    Wrapped,
+    Concerts,
+}
+
+/// A page this build does not know (saved by a newer one) is forgotten
+/// rather than failing the whole file, which would also lose the window frame.
+fn lenient_page<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<SavedPage>, D::Error> {
+    let value = Option::<serde_json::Value>::deserialize(deserializer)?;
+    Ok(value.and_then(|v| serde_json::from_value(v).ok()))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -367,6 +387,17 @@ mod tests {
         assert_eq!(load_from(&dir), UiState::default());
         fs::write(dir.join(UI_STATE_FILE), r#"{"page":"overview"}"#).unwrap();
         assert_eq!(load_from(&dir).page, Some(SavedPage::Overview));
+        fs::write(dir.join(UI_STATE_FILE), r#"{"page":"top_over_time"}"#).unwrap();
+        assert_eq!(load_from(&dir).page, Some(SavedPage::TopOverTime));
+        // A page from a newer build loses only the page, not the window.
+        fs::write(
+            dir.join(UI_STATE_FILE),
+            r#"{"page":"podcasts","window":{"x":1,"y":2,"width":900,"height":700}}"#,
+        )
+        .unwrap();
+        let state = load_from(&dir);
+        assert_eq!(state.page, None);
+        assert!(state.window.is_some());
         fs::remove_dir_all(&dir).unwrap();
     }
 

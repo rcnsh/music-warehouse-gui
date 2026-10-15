@@ -1,0 +1,48 @@
+{
+  "regions": [
+    { "key": "berlin", "label": "Berlin" },
+    { "key": "pt", "label": "Portugal" }
+  ],
+  "checked": {
+    "berlin": "2026-10-15T08:17:52.319Z",
+    "pt": "2026-10-15T08:17:52.319Z"
+  },
+  "concerts": [
+    {
+      "region": "berlin",
+      "date": "2027-01-28",
+      "time": "18:30",
+      "artists": "Two Door Cinema Club",
+      "name": "Two Door Cinema Club",
+      "venue": "Example Arena",
+      "city": "Berlin",
+      "status": "onsale",
+      "url": "https://www.ticketmaster.example/event/0001",
+      "first_seen": "2026-10-15T08:11:19.682Z"
+    },
+    {
+      "region": "pt",
+      "date": "2027-02-12",
+      "time": null,
+      "artists": "Maroon 5, Kanye West",
+      "name": "Maroon 5 with Special Guests",
+      "venue": null,
+      "city": "Lisbon",
+      "status": "offsale",
+      "url": null,
+      "first_seen": "2026-10-01T02:00:00.000Z"
+    },
+    {
+      "region": "pt",
+      "date": null,
+      "time": null,
+      "artists": "Kendrick Lamar",
+      "name": "Kendrick Lamar: Date to be announced",
+      "venue": "Example Stadium",
+      "city": "Porto",
+      "status": "tba",
+      "url": "https://www.ticketmaster.example/event/0003",
+      "first_seen": "2026-09-20T02:00:00.000Z"
+    }
+  ]
+}
