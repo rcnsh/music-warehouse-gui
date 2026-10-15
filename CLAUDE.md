@@ -35,17 +35,35 @@ instead: `MWGUI_DEV_TOKEN_FILE=~/dev/music-warehouse/.dev.vars`. Only the
 ### Screenshots without a Screen Recording grant
 
 `cargo run --features dev-capture` with `MWGUI_CAPTURE_DIR=/some/dir` set makes
-the app watch `<dir>/request`; writing `capture <name>` renders the window to
-`<dir>/<name>.png`, `action mwgui::ShowOverview` dispatches an action, and
-`artist <id>` / `track <id>` open those pages. See
-`src/dev_capture.rs`. It relies on GPUI's `test-support` feature, so it is never
-part of a normal build.
+the app watch `<dir>/request`, one command per line, and touch `<dir>/done`
+once handled:
 
-To drive the app from a script: send keystrokes with `osascript` (paste text
-via `pbcopy` and ⌘V; typed text gets garbled). System Events' `click at`
-performs an accessibility press, which buttons answer but plain `div` mouse
-handlers (the Overview chart) never see. Post a real click instead, with a
-few lines of Swift calling `CGEvent(mouseEventSource:mouseType:…)`.
+| Command | Effect |
+|---|---|
+| `capture <name>` | render the window to `<dir>/<name>.png` |
+| `action mwgui::ShowOverview` | dispatch an action by name |
+| `artist <id>`, `track <id>` | open those pages (`artist name:kendrick lamar` works too) |
+| `scroll <dy> [<x> <y>]` | scroll by `dy` points, positive down, at the window centre by default |
+| `click <x> <y>` | left-click at a point in the window, in points (a capture's pixels divided by the display scale) |
+
+Every command activates the window and draws a fresh frame first, and a
+capture keeps drawing for most of a second so chart animations finish. A
+window macOS is not presenting (behind others, on another Space, screen
+locked) only advances when the tool draws it, so don't rely on the screen.
+Leave a few seconds after a page change for its fetch and album art.
+
+Set `MWGUI_UI_STATE_FILE=/tmp/…/ui-state.json` too (honoured only by
+dev-capture builds) so a scripted run keeps its own window frame and page
+instead of overwriting the real `ui-state.json`. It relies on GPUI's
+`test-support` feature, so none of this is part of a normal build. See
+`src/dev_capture.rs`.
+
+To type into the app from a script, send keystrokes with `osascript` (paste
+text via `pbcopy` and ⌘V; typed text gets garbled). For clicks prefer the
+`click` command: System Events' `click at` performs an accessibility press,
+which buttons answer but plain `div` mouse handlers (the Overview chart)
+never see, and a real `CGEvent` click only lands while the window is
+actually on screen.
 
 ## Releasing
 
@@ -163,28 +181,39 @@ example: it once filtered only loaded rows, and now sends `q` to
 - `src/views/`: one file per view. `nav.rs` names the pages (`Section`, `Page`,
   sidebar `GROUPS`, Back stack); `shell.rs` holds every page view, the sidebar
   and top bar; `widgets.rs` holds shared states and page building blocks
+- `src/ui_state.rs`: window frame, last page and ranges in `ui-state.json`
+- `src/dev_capture.rs`: scripted captures, `dev-capture` builds only
 - `src/actions.rs`: actions (including `OpenArtist { id }` / `OpenTrack { id }`,
   dispatchable from any view), keybindings, menus
 
-### Page ownership
+### Pages
 
 Each page is one view and one store: `src/views/<page>.rs` and
 `src/state/<page>.rs` for `artist`, `track`, `albums`, `wrapped`, `on_repeat`,
-`on_this_day`, `rhythm`, `top_over_time`, `eras`, `concerts`. A page PR edits
-only its own two files. The shell calls `XView::new(client, window, cx)`,
-`activate(window, cx)` each time the page is shown (load on the first),
-`refresh(cx)` on ⌘R, and `Focusable::focus_handle`; Artist and Track also
-get `set_artist(id, cx)` / `set_track(id, cx)` before `activate`. A view's
-root element must `track_focus` its focus handle, or actions dispatched while
-it is showing never reach the shell. Shared files (`api.rs`, `models.rs`,
-`actions.rs`, `views/{shell,nav,mod,widgets,root}.rs`, `state/mod.rs`,
-`main.rs`, `tests/fixtures/`, `Cargo.toml`) change in their own PRs.
+`on_this_day`, `rhythm`, `top_over_time`, `eras`, `concerts`. The shell
+creates every view once, calls `activate(window, cx)` each time a page is
+shown (pages load on the first), `refresh(cx)` on ⌘R, and
+`Focusable::focus_handle`; Artist and Track also get `set_artist(id, cx)` /
+`set_track(id, cx)` before `activate`. A view's root element must
+`track_focus` its focus handle, or actions dispatched while it is showing
+never reach the shell.
+
+Build pages from `views/widgets.rs` rather than restyling: `page` (the
+scrolling column), `page_header`, `section_heading`, `card`, `stat_tile`,
+`RankedRow`, `bar_chart`, `sparkline`, the art helpers, and the formatting
+helpers (`count`, `minutes`, `percent`, `plural`, `month_label`,
+`month_span`, `day_label`, `local_day`, `local_day_time`). For a store's
+loading, error and loaded states use `page_body` inside a scrolling page and
+`remote_view` only in a fixed-size pane (Overview's panels), since
+`remote_view` stretches to fill its container; empty states in a page use
+`page_state`.
 
 To navigate from a page, dispatch an action rather than calling the shell:
 `window.dispatch_action(Box::new(OpenArtist::new(id)), cx)`, or give a
 `widgets::RankedRow` an action. Stats that name an artist without an id use
 `OpenArtist::by_name(name)`; the client sends the `name:` placeholder and its
-name, and the Worker folds it into the real artist.
+name, and the Worker folds it into the real artist. The ⌘K palette
+(`views/palette.rs`) gets the client from the shell when it opens.
 
 ## Conventions
 
