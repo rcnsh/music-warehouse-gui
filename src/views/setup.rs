@@ -183,7 +183,7 @@ impl SetupView {
                 client
                     .plays(1, None, None, &PlayFilter::default())
                     .await
-                    .map(Some)
+                    .map(|page| Some(page.plays))
             })
             .await;
             this.update(cx, |this, cx| {

@@ -106,6 +106,10 @@ pub struct FilterEcho {
 #[derive(Debug, Clone, Deserialize)]
 pub struct PlaysResponse {
     pub plays: Vec<Play>,
+    /// The `before` for the next page, opaque; null after the last page and
+    /// absent from Workers older than it.
+    #[serde(default)]
+    pub next_before: Option<String>,
     #[serde(flatten)]
     pub filter: FilterEcho,
 }

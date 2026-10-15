@@ -250,20 +250,23 @@ impl ApiClient {
         decode(&body)
     }
 
-    /// Newest-first page of plays strictly older than `before_ms` and newer
+    /// Newest-first page of plays strictly older than `before` and newer
     /// than `after_ms`, limited to those `filter` allows. With both bounds,
     /// a filtered list stays inside a date range.
     pub async fn plays(
         &self,
         limit: u32,
-        before_ms: Option<i64>,
+        before: Option<Before>,
         after_ms: Option<i64>,
         filter: &PlayFilter,
-    ) -> Result<Vec<Play>, ApiError> {
-        let query = plays_query(limit, before_ms, after_ms, filter);
+    ) -> Result<PlaysPage, ApiError> {
+        let query = plays_query(limit, before, after_ms, filter);
         let response: PlaysResponse = self.get(self.endpoint("plays", &query)).await?;
         filter.check_applied(&response.filter)?;
-        Ok(response.plays)
+        Ok(PlaysPage {
+            plays: response.plays,
+            next_before: response.next_before,
+        })
     }
 
     /// The URL of every play `filter` allows between the bounds as one CSV
@@ -652,14 +655,38 @@ const WRAPPED_TIMEOUT: Duration = Duration::from_secs(2 * 60);
 /// thousand rows, which the Worker streams in a minute or two.
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
+/// Where a page of plays ends (exclusive): a time, or the cursor the Worker
+/// returned with the previous page.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Before {
+    Ms(i64),
+    /// Opaque; sent back exactly as received.
+    Cursor(String),
+}
+
+/// One page of `/api/plays`, and the cursor for the page after it when the
+/// Worker sends one (older Workers do not, and none is sent after the last).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct PlaysPage {
+    pub plays: Vec<Play>,
+    pub next_before: Option<String>,
+}
+
 fn plays_query(
     limit: u32,
-    before_ms: Option<i64>,
+    before: Option<Before>,
     after_ms: Option<i64>,
     filter: &PlayFilter,
 ) -> Vec<(&'static str, String)> {
     let mut query = vec![("limit", limit.to_string())];
-    query.extend(bounds_query(before_ms, after_ms, filter));
+    match before {
+        Some(Before::Ms(ms)) => query.extend(bounds_query(Some(ms), after_ms, filter)),
+        Some(Before::Cursor(cursor)) => {
+            query.push(("before", cursor));
+            query.extend(bounds_query(None, after_ms, filter));
+        }
+        None => query.extend(bounds_query(None, after_ms, filter)),
+    }
     query
 }
 
@@ -934,7 +961,7 @@ mod tests {
     fn plays_search_is_encoded_into_q() {
         let url = client().endpoint(
             "plays",
-            &plays_query(200, Some(17), None, &search("Sad & 100%")),
+            &plays_query(200, Some(Before::Ms(17)), None, &search("Sad & 100%")),
         );
         assert_eq!(
             url.as_str(),
@@ -953,10 +980,28 @@ mod tests {
     }
 
     #[test]
+    fn a_cursor_from_the_worker_is_sent_back_as_before() {
+        let c = client();
+        assert_eq!(
+            c.endpoint(
+                "plays",
+                &plays_query(
+                    200,
+                    Some(Before::Cursor("1791331200000:abc".into())),
+                    None,
+                    &PlayFilter::default()
+                )
+            )
+            .as_str(),
+            "https://music.example.com/api/plays?limit=200&before=1791331200000%3Aabc"
+        );
+    }
+
+    #[test]
     fn plays_search_can_stay_inside_a_date_range() {
         let url = client().endpoint(
             "plays",
-            &plays_query(100, Some(20), Some(10), &search("dna")),
+            &plays_query(100, Some(Before::Ms(20)), Some(10), &search("dna")),
         );
         assert_eq!(
             url.as_str(),
@@ -972,8 +1017,11 @@ mod tests {
         let c = client();
         let song = PlayFilter::song("67XC51nlZncNpHmZ8rOU9a");
         assert_eq!(
-            c.endpoint("plays", &plays_query(100, Some(20), None, &song))
-                .as_str(),
+            c.endpoint(
+                "plays",
+                &plays_query(100, Some(Before::Ms(20)), None, &song)
+            )
+            .as_str(),
             "https://music.example.com/api/plays?limit=100&before=20&track_id=67XC51nlZncNpHmZ8rOU9a"
         );
         let artist = PlayFilter::artist("2YZyLoL8N0Wb9xBt1NhZWg").search(Some("we cry"));
