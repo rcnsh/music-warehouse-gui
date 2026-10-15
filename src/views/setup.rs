@@ -239,12 +239,10 @@ impl SetupView {
         // also closes the loopback listener.
         self._task = Some(cx.spawn(async move |this, cx| {
             let outcome = async {
-                let pending = flatten(
-                    runtime::run_cancellable(async { Ok(signin::start(base).await) }).await,
-                )?;
+                let pending = flatten(runtime::run(async { Ok(signin::start(base).await) }).await)?;
                 let login_url = pending.login_url.to_string();
                 cx.update(|cx| cx.open_url(&login_url));
-                flatten(runtime::run_cancellable(async { Ok(pending.finish().await) }).await)
+                flatten(runtime::run(async { Ok(pending.finish().await) }).await)
             }
             .await;
             this.update(cx, |this, cx| match outcome {

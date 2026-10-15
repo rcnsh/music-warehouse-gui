@@ -27,8 +27,13 @@ impl ErasStore {
     pub fn refresh(&mut self, cx: &mut Context<Self>) {
         self.eras.start();
         let client = self.client.clone();
-        self._task = Some(state::fetch(cx, async move { client.eras().await }, |s| {
-            &mut s.eras
-        }));
+        self._task = Some(state::fetch(
+            cx,
+            move || {
+                let client = client.clone();
+                async move { client.eras().await }
+            },
+            |s| &mut s.eras,
+        ));
     }
 }

@@ -51,7 +51,10 @@ impl OnThisDayStore {
         let tz = dates::system_timezone();
         self._task = Some(state::fetch(
             cx,
-            async move { client.on_this_day(date, &tz).await },
+            move || {
+                let (client, tz) = (client.clone(), tz.clone());
+                async move { client.on_this_day(date, &tz).await }
+            },
             |s| &mut s.day,
         ));
     }

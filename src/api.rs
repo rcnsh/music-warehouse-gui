@@ -63,6 +63,11 @@ pub enum ApiError {
     RateLimited { retry_after_seconds: Option<u64> },
     #[error("Spotify returned an error: {0}")]
     Upstream(String),
+    /// A 503 with `Retry-After` and no `needs_reauth`: the Worker is
+    /// computing a summary for the first time and another request holds
+    /// the claim. Asking again after the wait answers it.
+    #[error("The Worker is still computing this.")]
+    StillComputing { retry_after_seconds: u64 },
     #[error("The Worker returned HTTP {status}: {message}")]
     Server { status: u16, message: String },
     #[error("Could not reach the Worker: {0}")]
@@ -75,22 +80,26 @@ pub enum ApiError {
 }
 
 impl ApiError {
-    /// Maps a non-2xx status and its body to an error. Kept free of I/O so the
-    /// Worker's documented failure table can be tested against fixtures.
-    pub fn from_response(status: u16, body: &str) -> Self {
+    /// Maps a non-2xx status, its `Retry-After` header and its body to an
+    /// error. Kept free of I/O so the Worker's documented failure table can
+    /// be tested against fixtures.
+    pub fn from_response(status: u16, retry_after: Option<u64>, body: &str) -> Self {
         let parsed: ErrorBody = serde_json::from_str(body).unwrap_or_default();
         let message = parsed
             .error
             .clone()
             .unwrap_or_else(|| body.chars().take(200).collect());
-        match status {
-            401 => Self::Unauthorized,
-            400 => Self::BadRequest(message),
-            429 => Self::RateLimited {
+        match (status, retry_after) {
+            (401, _) => Self::Unauthorized,
+            (400, _) => Self::BadRequest(message),
+            (429, _) => Self::RateLimited {
                 retry_after_seconds: parsed.retry_after_seconds,
             },
-            503 if parsed.needs_reauth => Self::NeedsReauth,
-            502 => Self::Upstream(message),
+            (503, _) if parsed.needs_reauth => Self::NeedsReauth,
+            (503, Some(retry_after_seconds)) => Self::StillComputing {
+                retry_after_seconds,
+            },
+            (502, _) => Self::Upstream(message),
             _ => Self::Server { status, message },
         }
     }
@@ -203,22 +212,34 @@ impl ApiClient {
     }
 
     async fn get<T: DeserializeOwned>(&self, url: Url) -> Result<T, ApiError> {
-        let response = self
-            .http
-            .get(url)
-            .bearer_auth(self.token.expose())
+        self.get_within(url, None).await
+    }
+
+    /// [`get`](Self::get) with its own time limit in place of the client's
+    /// 20 s, for a route that may compute before it answers.
+    async fn get_within<T: DeserializeOwned>(
+        &self,
+        url: Url,
+        timeout: Option<Duration>,
+    ) -> Result<T, ApiError> {
+        let mut request = self.http.get(url).bearer_auth(self.token.expose());
+        if let Some(timeout) = timeout {
+            request = request.timeout(timeout);
+        }
+        let response = request
             .send()
             .await
             // reqwest's error text includes the URL but never headers, so it
             // is safe to surface; the token only travels in a header.
             .map_err(|e| ApiError::Network(e.without_url().to_string()))?;
         let status = response.status();
+        let retry_after = retry_after_header(&response);
         let body = response
             .text()
             .await
             .map_err(|e| ApiError::Network(e.without_url().to_string()))?;
         if status != StatusCode::OK {
-            return Err(ApiError::from_response(status.as_u16(), &body));
+            return Err(ApiError::from_response(status.as_u16(), retry_after, &body));
         }
         decode(&body)
     }
@@ -274,8 +295,9 @@ impl ApiClient {
             .map_err(|e| ApiError::Network(e.without_url().to_string()))?;
         let status = response.status();
         if status != StatusCode::OK {
+            let retry_after = retry_after_header(&response);
             let body = response.text().await.unwrap_or_default();
-            return Err(ApiError::from_response(status.as_u16(), &body));
+            return Err(ApiError::from_response(status.as_u16(), retry_after, &body));
         }
         let mut written = 0u64;
         while let Some(chunk) = response
@@ -452,7 +474,10 @@ impl ApiClient {
     /// computed); anything else is a 403, [`ApiError::Server`].
     pub async fn wrapped(&self, from: &str, to: &str) -> Result<Wrapped, ApiError> {
         let query = [("from", from.to_owned()), ("to", to.to_owned())];
-        self.get(self.endpoint("wrapped", &query)).await
+        // A range never computed is summarised inline, which over years of
+        // plays can outlast the usual limit.
+        self.get_within(self.endpoint("wrapped", &query), Some(WRAPPED_TIMEOUT))
+            .await
     }
 
     /// Upcoming concerts, optionally one region's (a key from the
@@ -614,6 +639,9 @@ impl PlayFilter {
     }
 }
 
+/// The longest a Wrapped summary may take, computing included.
+const WRAPPED_TIMEOUT: Duration = Duration::from_secs(2 * 60);
+
 /// The longest a CSV download may take. A whole history is a few hundred
 /// thousand rows, which the Worker streams in a minute or two.
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(30 * 60);
@@ -657,6 +685,22 @@ fn range_query(range: &DateRange, tz: &str) -> Vec<(&'static str, String)> {
         ("to", range.query_to()),
         ("tz", tz.to_owned()),
     ]
+}
+
+/// `Retry-After` in seconds. The Worker only sends the delay form, never an
+/// HTTP date, so anything else is treated as absent.
+fn retry_after_header(response: &reqwest::Response) -> Option<u64> {
+    parse_retry_after(
+        response
+            .headers()
+            .get(reqwest::header::RETRY_AFTER)?
+            .to_str()
+            .ok()?,
+    )
+}
+
+fn parse_retry_after(value: &str) -> Option<u64> {
+    value.trim().parse().ok()
 }
 
 /// Only a 404 proves admin access; anything else (401, an edge error page)
@@ -762,33 +806,55 @@ mod tests {
     #[test]
     fn worker_failure_table_maps_to_distinct_errors() {
         assert_eq!(
-            ApiError::from_response(503, &fixture("error-503-needs-reauth.json")),
+            ApiError::from_response(503, None, &fixture("error-503-needs-reauth.json")),
             ApiError::NeedsReauth
         );
         assert_eq!(
-            ApiError::from_response(429, &fixture("error-429-rate-limited.json")),
+            ApiError::from_response(429, None, &fixture("error-429-rate-limited.json")),
             ApiError::RateLimited {
                 retry_after_seconds: Some(30)
             }
         );
         assert_eq!(
-            ApiError::from_response(502, &fixture("error-502-upstream.json")),
+            ApiError::from_response(502, None, &fixture("error-502-upstream.json")),
             ApiError::Upstream("Spotify upstream: http".into())
         );
         assert_eq!(
-            ApiError::from_response(401, &fixture("error-401.json")),
+            ApiError::from_response(401, None, &fixture("error-401.json")),
             ApiError::Unauthorized
         );
         assert_eq!(
-            ApiError::from_response(400, &fixture("error-400-bad-request.json")),
+            ApiError::from_response(400, None, &fixture("error-400-bad-request.json")),
             ApiError::BadRequest("Unknown IANA timezone: Mars/Base".into())
         );
     }
 
     #[test]
+    fn a_503_with_retry_after_is_still_computing() {
+        let body = r#"{"error":"Stats are being computed; try again shortly."}"#;
+        assert_eq!(
+            ApiError::from_response(503, Some(42), body),
+            ApiError::StillComputing {
+                retry_after_seconds: 42
+            }
+        );
+        // needs_reauth wins over a Retry-After, and a bare 503 stays generic.
+        assert_eq!(
+            ApiError::from_response(503, Some(5), &fixture("error-503-needs-reauth.json")),
+            ApiError::NeedsReauth
+        );
+        assert!(matches!(
+            ApiError::from_response(503, None, body),
+            ApiError::Server { status: 503, .. }
+        ));
+        assert_eq!(parse_retry_after(" 120 "), Some(120));
+        assert_eq!(parse_retry_after("Wed, 21 Oct 2026 07:28:00 GMT"), None);
+    }
+
+    #[test]
     fn non_json_error_bodies_still_classify() {
         // A Cloudflare edge page in front of the Worker returns HTML, not JSON.
-        let error = ApiError::from_response(500, "<html>oops</html>");
+        let error = ApiError::from_response(500, None, "<html>oops</html>");
         assert_eq!(
             error,
             ApiError::Server {
@@ -798,7 +864,7 @@ mod tests {
         );
         // A 503 without the flag is a plain server error, not a reauth prompt.
         assert!(matches!(
-            ApiError::from_response(503, "{}"),
+            ApiError::from_response(503, None, "{}"),
             ApiError::Server { status: 503, .. }
         ));
     }

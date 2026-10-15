@@ -62,7 +62,10 @@ impl TrackStore {
         let track = id.clone();
         self._task = Some(state::fetch(
             cx,
-            async move { client.track(&track, &tz).await },
+            move || {
+                let (client, track, tz) = (client.clone(), track.clone(), tz.clone());
+                async move { client.track(&track, &tz).await }
+            },
             |s| &mut s.history,
         ));
         self.fetch_daily(cx);
@@ -80,7 +83,10 @@ impl TrackStore {
         let filter = PlayFilter::song(id.to_string());
         self._daily_task = Some(state::fetch(
             cx,
-            async move { client.daily(&range, &tz, &filter).await },
+            move || {
+                let (client, tz, filter) = (client.clone(), tz.clone(), filter.clone());
+                async move { client.daily(&range, &tz, &filter).await }
+            },
             |s| &mut s.daily.days,
         ));
     }

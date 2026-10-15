@@ -53,6 +53,16 @@ pub fn describe(error: &ApiError) -> ErrorCopy {
             format!("The Worker could not get an answer from Spotify ({message})."),
         ),
         ApiError::BadRequest(message) => ("Request refused", message.clone()),
+        ApiError::StillComputing {
+            retry_after_seconds,
+        } => (
+            "Still computing…",
+            format!(
+                "The Worker is working this out for the first time. It asked to be \
+                 asked again in {}; this page does that by itself.",
+                human_seconds(*retry_after_seconds)
+            ),
+        ),
         ApiError::Server { status, message } => {
             ("Worker error", format!("HTTP {status}: {message}"))
         }
@@ -133,20 +143,8 @@ pub fn error_panel(
     cx: &App,
 ) -> impl IntoElement {
     let copy = describe(error);
-    let icon = if error.is_spotify_side() {
-        IconName::CloudOff
-    } else {
-        IconName::TriangleAlert
-    };
-    // Retrying with a rejected token cannot work; signing in again can.
-    let button = if *error == ApiError::Unauthorized {
-        Button::new(id)
-            .small()
-            .label("Sign in again")
-            .on_click(|_, window, cx| window.dispatch_action(Box::new(OpenSettings), cx))
-    } else {
-        Button::new(id).small().label("Retry").on_click(on_retry)
-    };
+    let icon = error_icon(error);
+    let button = retry_button(id, error, on_retry).small();
     state_panel(
         Some(Icon::new(icon)),
         copy.title,
@@ -169,9 +167,13 @@ pub fn error_banner(
         .px_3()
         .py_1p5()
         .rounded_md()
-        .bg(cx.theme().danger.opacity(0.1))
+        .map(|this| match error {
+            // Not a failure: the page fills in by itself once it is computed.
+            ApiError::StillComputing { .. } => this.bg(cx.theme().muted),
+            _ => this.bg(cx.theme().danger.opacity(0.1)),
+        })
         .text_sm()
-        .child(Icon::new(IconName::TriangleAlert).small())
+        .child(Icon::new(error_icon(error)).small())
         .child(div().font_semibold().child(copy.title))
         .child(
             div()
@@ -180,7 +182,31 @@ pub fn error_banner(
                 .text_color(cx.theme().muted_foreground)
                 .child(copy.detail),
         )
-        .child(Button::new(id).xsmall().label("Retry").on_click(on_retry))
+        .child(retry_button(id, error, on_retry).xsmall())
+}
+
+fn error_icon(error: &ApiError) -> IconName {
+    match error {
+        ApiError::StillComputing { .. } => IconName::LoaderCircle,
+        error if error.is_spotify_side() => IconName::CloudOff,
+        _ => IconName::TriangleAlert,
+    }
+}
+
+/// Retry, or "Sign in again" for a rejected token: retrying with it cannot
+/// work, signing in again can.
+fn retry_button(
+    id: impl Into<ElementId>,
+    error: &ApiError,
+    on_retry: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> Button {
+    if *error == ApiError::Unauthorized {
+        Button::new(id)
+            .label("Sign in again")
+            .on_click(|_, window, cx| window.dispatch_action(Box::new(OpenSettings), cx))
+    } else {
+        Button::new(id).label("Retry").on_click(on_retry)
+    }
 }
 
 /// Album or artist art at a fixed size. Missing art and failed downloads

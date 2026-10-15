@@ -29,7 +29,10 @@ impl OnRepeatStore {
         let client = self.client.clone();
         self._task = Some(state::fetch(
             cx,
-            async move { client.on_repeat().await },
+            move || {
+                let client = client.clone();
+                async move { client.on_repeat().await }
+            },
             |s| &mut s.on_repeat,
         ));
     }

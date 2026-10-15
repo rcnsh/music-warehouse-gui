@@ -71,7 +71,7 @@ impl CsvExport {
         self._task = Some(cx.spawn(async move |this, cx| {
             // Cancellable: dropping this task (Cancel, or a new export)
             // stops the download rather than letting it run on unseen.
-            let result = runtime::run_cancellable(async move {
+            let result = runtime::run(async move {
                 let part = partial_path(&target);
                 let outcome = download(&client, url, &part, &target, lines).await;
                 if outcome.is_err() {

@@ -30,7 +30,10 @@ impl RhythmStore {
         let client = self.client.clone();
         self._task = Some(state::fetch(
             cx,
-            async move { client.rhythm().await },
+            move || {
+                let client = client.clone();
+                async move { client.rhythm().await }
+            },
             |s| &mut s.rhythm,
         ));
     }

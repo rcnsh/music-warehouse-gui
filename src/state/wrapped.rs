@@ -40,15 +40,21 @@ impl WrappedStore {
             let result = runtime::run(async move { client.wrapped_ranges().await }).await;
             this.update(cx, |this, cx| {
                 this.ranges.finish(result);
+                let ranges = this.ranges.data.as_ref();
                 let choice = match &this.selected {
-                    Some(selected) => Some(selected.clone()),
-                    None => this.ranges.data.as_ref().and_then(default_range),
+                    // The fresh entry, so its `computed` flag is current.
+                    Some(selected) => Some(
+                        ranges
+                            .and_then(|r| r.ranges.iter().find(|p| same_range(p, selected)))
+                            .unwrap_or(selected)
+                            .clone(),
+                    ),
+                    None => ranges.and_then(default_range),
                 };
                 match choice {
-                    Some(preset) => {
-                        this.selected = None;
-                        this.select(preset, cx);
-                    }
+                    // The same range keeps its summary on screen while it
+                    // reloads, as `Remote` does everywhere else.
+                    Some(preset) => this.select(preset, cx),
                     None => cx.notify(),
                 }
             })
@@ -57,7 +63,11 @@ impl WrappedStore {
     }
 
     pub fn select(&mut self, preset: WrappedPreset, cx: &mut Context<Self>) {
-        if self.selected.as_ref() != Some(&preset) {
+        if !self
+            .selected
+            .as_ref()
+            .is_some_and(|selected| same_range(selected, &preset))
+        {
             self.wrapped.reset();
         }
         self.wrapped.start();
@@ -66,10 +76,19 @@ impl WrappedStore {
         self.selected = Some(preset);
         self._wrapped_task = Some(state::fetch(
             cx,
-            async move { client.wrapped(&from, &to).await },
+            move || {
+                let (client, from, to) = (client.clone(), from.clone(), to.clone());
+                async move { client.wrapped(&from, &to).await }
+            },
             |s| &mut s.wrapped,
         ));
     }
+}
+
+/// Whether two presets summarise the same days. Compared by dates alone, so
+/// a range that has since been computed (or relabelled) still counts.
+fn same_range(a: &WrappedPreset, b: &WrappedPreset) -> bool {
+    (&a.from, &a.to) == (&b.from, &b.to)
 }
 
 fn default_range(ranges: &WrappedRanges) -> Option<WrappedPreset> {
@@ -91,6 +110,19 @@ mod tests {
             computed,
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn a_range_is_the_same_whatever_its_label_or_computed_flag() {
+        let mut a = preset("2026 so far", false);
+        a.from = "2026-01-01".into();
+        a.to = "2026-10-14".into();
+        let mut b = a.clone();
+        b.computed = true;
+        b.label = "This year".into();
+        assert!(same_range(&a, &b));
+        b.to = "2026-10-15".into();
+        assert!(!same_range(&a, &b));
     }
 
     #[test]

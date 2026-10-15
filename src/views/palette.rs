@@ -90,7 +90,7 @@ impl PaletteSearch {
             cx.background_executor().timer(SEARCH_AFTER).await;
             let q = query.clone();
             let result =
-                runtime::run_cancellable(
+                runtime::run(
                     async move { client.search(&q, None, SEARCH_LIMIT).await },
                 )
                 .await;
