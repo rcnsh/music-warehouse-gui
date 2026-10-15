@@ -358,7 +358,7 @@ pub struct HistoryView {
 
 impl HistoryView {
     pub fn new(client: ApiClient, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let export = cx.new(|_| CsvExport::new(client.clone()));
+        let export = cx.new(|cx| CsvExport::new(client.clone(), cx));
         let store = cx.new(|cx| HistoryStore::new(client, cx));
         let delegate = PlaysTable {
             store: store.clone(),
@@ -439,10 +439,10 @@ impl HistoryView {
             return;
         }
         let store = self.store.read(cx);
-        let request = store.export_request();
         let name = export::suggested_name(store.scope().map(Scope::name), store.query());
         #[cfg(feature = "dev-capture")]
         if let Some(path) = crate::dev_capture::export_path() {
+            let request = self.store.read(cx).export_request();
             self.export
                 .update(cx, |export, cx| export.start(request, path, cx));
             return;
@@ -465,7 +465,10 @@ impl HistoryView {
                     return;
                 }
             };
+            // The panel does not block the window, so the filters are read
+            // once it closes: the file holds what the list shows then.
             this.update(cx, |this, cx| {
+                let request = this.store.read(cx).export_request();
                 this.export
                     .update(cx, |export, cx| export.start(request, path, cx))
             })
