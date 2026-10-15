@@ -8,7 +8,7 @@ use crate::api::{ApiClient, ApiError, PlayFilter, TopRange};
 use crate::dates::{self, DateRange, RangePreset};
 use crate::models::{DailyResponse, TopArtistsResponse, TopResponse, TopTracksResponse};
 use crate::runtime;
-use crate::state::Remote;
+use crate::state::{self, Remote};
 use crate::ui_state;
 
 pub const TOP_ARTISTS_LIMIT: u32 = 50;
@@ -206,19 +206,28 @@ impl OverviewStore {
         let (client, tz) = (self.client.clone(), self.tz.clone());
         let daily = spawn_range_request(
             cx,
-            async move { client.daily(&range, &tz, &PlayFilter::default()).await },
+            move || {
+                let (client, tz) = (client.clone(), tz.clone());
+                async move { client.daily(&range, &tz, &PlayFilter::default()).await }
+            },
             |s| &mut s.daily,
         );
         let (client, tz) = (self.client.clone(), self.tz.clone());
         let artists = spawn_range_request(
             cx,
-            async move { client.top_artists(&range, &tz, TOP_ARTISTS_LIMIT).await },
+            move || {
+                let (client, tz) = (client.clone(), tz.clone());
+                async move { client.top_artists(&range, &tz, TOP_ARTISTS_LIMIT).await }
+            },
             |s| &mut s.artists,
         );
         let (client, tz) = (self.client.clone(), self.tz.clone());
         let tracks = spawn_range_request(
             cx,
-            async move { client.top_tracks(&range, &tz, TOP_TRACKS_LIMIT).await },
+            move || {
+                let (client, tz) = (client.clone(), tz.clone());
+                async move { client.top_tracks(&range, &tz, TOP_TRACKS_LIMIT).await }
+            },
             |s| &mut s.tracks,
         );
         // Replacing the tasks cancels requests for a range no longer shown.
@@ -245,23 +254,14 @@ impl OverviewStore {
 /// Like `state::fetch`, but offers the range to the cache after each answer.
 fn spawn_range_request<T, F>(
     cx: &mut Context<OverviewStore>,
-    request: F,
+    request: impl Fn() -> F + 'static,
     slot: fn(&mut OverviewStore) -> &mut Remote<T>,
 ) -> Task<()>
 where
     T: Send + 'static,
     F: Future<Output = Result<T, ApiError>> + Send + 'static,
 {
-    cx.notify();
-    cx.spawn(async move |this, cx| {
-        let result = runtime::run(request).await;
-        this.update(cx, |this, cx| {
-            slot(this).finish(result);
-            this.cache_if_complete();
-            cx.notify();
-        })
-        .ok();
-    })
+    state::fetch_then(cx, request, slot, |this, _| this.cache_if_complete())
 }
 
 /// A range as the Worker resolves it: the same days in another zone are

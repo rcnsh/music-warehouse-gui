@@ -22,21 +22,11 @@ fn runtime() -> &'static tokio::runtime::Runtime {
 }
 
 /// Runs an API future on the HTTP runtime and resolves with its result.
+/// Dropping the returned future stops the work too: a plain `JoinHandle`
+/// keeps its task running when dropped, so a request a store has replaced
+/// (a newer range, a closed page) would otherwise run to completion unseen,
+/// and a cancelled sign-in would leave its loopback listener open.
 pub async fn run<F, T>(future: F) -> Result<T, ApiError>
-where
-    F: Future<Output = Result<T, ApiError>> + Send + 'static,
-    T: Send + 'static,
-{
-    runtime()
-        .spawn(future)
-        .await
-        .map_err(|e| ApiError::Network(format!("request task stopped: {e}")))?
-}
-
-/// Like [`run`], but dropping the returned future stops the work too. A plain
-/// `JoinHandle` keeps its task running when dropped, which for a sign-in
-/// would leave a loopback listener open after the user cancelled.
-pub async fn run_cancellable<F, T>(future: F) -> Result<T, ApiError>
 where
     F: Future<Output = Result<T, ApiError>> + Send + 'static,
     T: Send + 'static,

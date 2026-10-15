@@ -88,7 +88,7 @@ impl TableDelegate for ArtistsTable {
             _ => {
                 // The Worker sorts by plays, so the first row is the scale;
                 // nothing is summed or re-ranked here.
-                let top = rows.first().map(|a| a.plays).unwrap_or(1).max(1);
+                let top = widgets::top_scale(rows.iter().map(|a| a.plays));
                 let share = artist.plays as f32 / top as f32;
                 h_flex()
                     .gap_2()

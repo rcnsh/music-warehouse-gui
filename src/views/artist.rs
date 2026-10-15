@@ -157,7 +157,7 @@ fn render_history(data: &ArtistHistory, daily: AnyElement, cx: &App) -> AnyEleme
             cx,
         );
     }
-    let top = data.top_tracks.first().map_or(0, |t| t.plays).max(1) as f32;
+    let top = widgets::top_scale(data.top_tracks.iter().map(|t| t.plays)) as f32;
     let songs = data.top_tracks.iter().enumerate().map(|(ix, song)| {
         let row = widgets::RankedRow::new(("artist-song", ix), song.name.clone())
             .rank(ix + 1)

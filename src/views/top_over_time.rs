@@ -167,7 +167,7 @@ fn period_section(ix: usize, period: &Period, cx: &App) -> AnyElement {
     if period.partial {
         detail.push_str(" · so far");
     }
-    let top_track = period.tracks.first().map(|t| t.plays).unwrap_or(0).max(1) as f32;
+    let top_track = widgets::top_scale(period.tracks.iter().map(|t| t.plays)) as f32;
     let artists =
         v_flex()
             .flex_1()

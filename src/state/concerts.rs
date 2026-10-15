@@ -47,7 +47,10 @@ impl ConcertsStore {
         let since = self.new_only.then(|| new_since(dates::today_local()));
         self._task = Some(state::fetch(
             cx,
-            async move { client.concerts(None, since, &tz).await },
+            move || {
+                let (client, tz) = (client.clone(), tz.clone());
+                async move { client.concerts(None, since, &tz).await }
+            },
             |s| &mut s.concerts,
         ));
     }

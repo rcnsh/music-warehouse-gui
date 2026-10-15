@@ -288,16 +288,35 @@ impl Pending {
     }
 }
 
+/// Failed accepts in a row before sign-in gives up, and the pause after each.
+const ACCEPT_FAILURES: u32 = 20;
+const ACCEPT_BACKOFF: Duration = Duration::from_millis(100);
+
 /// Serves the loopback listener until one request carries the Worker's
 /// answer, then stops listening. Each connection is handled on its own task,
 /// so a connection that never sends anything cannot block the real redirect.
 async fn wait_for_code(listener: TcpListener, timeout: Duration) -> Result<String, SignInError> {
     let (tx, mut rx) = mpsc::channel(1);
     let accept = tokio::spawn(async move {
+        let mut failures = 0;
         loop {
-            let Ok((stream, _)) = listener.accept().await else {
-                continue;
+            let stream = match listener.accept().await {
+                Ok((stream, _)) => stream,
+                // Usually transient (a connection reset before it was
+                // accepted, or briefly out of file descriptors), but one
+                // that persists would otherwise spin a core until timeout.
+                Err(e) => {
+                    failures += 1;
+                    if failures >= ACCEPT_FAILURES {
+                        let message = format!("the loopback listener failed: {e}");
+                        let _ = tx.send(Err(SignInError::Local(message))).await;
+                        return;
+                    }
+                    tokio::time::sleep(ACCEPT_BACKOFF).await;
+                    continue;
+                }
             };
+            failures = 0;
             let tx = tx.clone();
             tokio::spawn(async move {
                 if let Some(outcome) = serve(stream).await {

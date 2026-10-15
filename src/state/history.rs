@@ -3,10 +3,11 @@ use std::collections::HashSet;
 use chrono::{DateTime, NaiveDate};
 use gpui::{Context, SharedString, Task};
 
-use crate::api::{ApiClient, ApiError, PlayFilter};
+use crate::api::{ApiClient, ApiError, Before, PlayFilter, PlaysPage};
 use crate::dates;
 use crate::models::{Credit, Play, RecentlyPlayedItem, pick_image};
 use crate::runtime;
+use crate::state::now_playing;
 
 /// Rows per request. The Worker caps `limit` at 500; 200 fills a tall window
 /// several times over while keeping each response small.
@@ -24,6 +25,8 @@ pub struct PlayLog {
     plays: Vec<Play>,
     /// The warehouse's primary key, so overlapping pages never duplicate rows.
     seen: HashSet<(i64, String)>,
+    /// The Worker's cursor for the next page, when it sent one.
+    cursor: Option<String>,
     exhausted: bool,
 }
 
@@ -36,11 +39,16 @@ impl PlayLog {
         self.exhausted
     }
 
-    /// `before` is exclusive, so asking from one millisecond past the oldest
-    /// row re-reads its timestamp: plays sharing it with a different track are
-    /// picked up rather than skipped, and `seen` drops the repeat.
-    pub fn next_before(&self) -> Option<i64> {
-        self.plays.last().map(|p| p.played_at_ms + 1)
+    /// Where the next page starts: the Worker's cursor when it sent one.
+    /// Otherwise, since `before` is exclusive, one millisecond past the
+    /// oldest row, which re-reads its timestamp: plays sharing it with a
+    /// different track are picked up rather than skipped, and `seen` drops
+    /// the repeat.
+    pub fn next_before(&self) -> Option<Before> {
+        if let Some(cursor) = &self.cursor {
+            return Some(Before::Cursor(cursor.clone()));
+        }
+        self.plays.last().map(|p| Before::Ms(p.played_at_ms + 1))
     }
 
     /// Merges plays newer than the newest loaded one (an `after` query) onto
@@ -69,10 +77,12 @@ impl PlayLog {
             .contains(&(play.played_at_ms, play.track_id.clone()))
     }
 
-    pub fn append_page(&mut self, page: Vec<Play>, page_size: u32) {
-        let full_page = page.len() as u32 >= page_size;
+    pub fn append_page(&mut self, page: PlaysPage, page_size: u32) {
+        let PlaysPage { plays, next_before } = page;
+        self.cursor = next_before;
+        let full_page = plays.len() as u32 >= page_size;
         let mut added = 0;
-        for play in page {
+        for play in plays {
             if self.seen.insert((play.played_at_ms, play.track_id.clone())) {
                 self.plays.push(play);
                 added += 1;
@@ -229,8 +239,11 @@ struct Feed {
     log: PlayLog,
     loading: bool,
     error: Option<ApiError>,
-    /// Replacing or dropping the feed cancels its in-flight page, so a stale
-    /// response cannot append to a newer list.
+    /// Failed requests in a row, for the backoff before trying again.
+    failures: u32,
+    /// The in-flight page, or the wait before retrying a failed one.
+    /// Replacing or dropping the feed cancels it, so a stale response cannot
+    /// append to a newer list.
     _task: Option<Task<()>>,
 }
 
@@ -283,10 +296,6 @@ impl HistoryStore {
 
     fn feed(&self) -> &Feed {
         self.filtered.as_ref().unwrap_or(&self.main)
-    }
-
-    fn feed_mut(&mut self) -> &mut Feed {
-        self.filtered.as_mut().unwrap_or(&mut self.main)
     }
 
     pub fn plays(&self) -> &[Play] {
@@ -396,7 +405,7 @@ impl HistoryStore {
         };
         ExportRequest {
             filter,
-            before: self.anchor_before(),
+            before: self.anchor_before_ms(),
             after,
         }
     }
@@ -449,11 +458,14 @@ impl HistoryStore {
 
     /// Adds plays ingested since the newest loaded one. Cheap: the Worker
     /// reads only rows after the cursor, usually none. Skipped while jumped
-    /// to a day, filtering, loading, or failing.
+    /// to a day, filtering, loading, or failing; a failed list is retried
+    /// instead, so returning to the window recovers it straight away.
     pub fn check_newer(&mut self, cx: &mut Context<Self>) {
         if self.anchor.is_none() {
             self.fetch_live(cx);
         }
+        self.recover(false, cx);
+        self.recover(true, cx);
         let Some(after) = self.main.log.newest_ms() else {
             return;
         };
@@ -506,9 +518,35 @@ impl HistoryStore {
 
     /// Clears an error and repeats the request that failed.
     pub fn retry(&mut self, cx: &mut Context<Self>) {
-        self.feed_mut().error = None;
-        let before = self.feed().log.next_before().or(self.anchor_before());
-        self.fetch(self.filtered.is_some(), before, cx);
+        self.retry_feed(self.filtered.is_some(), cx);
+    }
+
+    fn retry_feed(&mut self, filtered: bool, cx: &mut Context<Self>) {
+        let anchor_before = self.anchor_before();
+        let Some(feed) = self.feed_at(filtered) else {
+            return;
+        };
+        feed.error = None;
+        let before = feed.log.next_before().or(anchor_before);
+        self.fetch(filtered, before, cx);
+    }
+
+    /// Retries a list whose last request failed, unless one is in flight.
+    fn recover(&mut self, filtered: bool, cx: &mut Context<Self>) {
+        if self
+            .feed_at(filtered)
+            .is_some_and(|feed| feed.error.is_some() && !feed.loading)
+        {
+            self.retry_feed(filtered, cx);
+        }
+    }
+
+    fn feed_at(&mut self, filtered: bool) -> Option<&mut Feed> {
+        if filtered {
+            self.filtered.as_mut()
+        } else {
+            Some(&mut self.main)
+        }
     }
 
     /// Asks Spotify for its last plays. They are an optional extra: when
@@ -548,13 +586,17 @@ impl HistoryStore {
         dates::end_of_local_day_ms(day, &chrono::Local).map(|ms| ms - 1)
     }
 
-    fn anchor_before(&self) -> Option<i64> {
+    fn anchor_before(&self) -> Option<Before> {
+        self.anchor_before_ms().map(Before::Ms)
+    }
+
+    fn anchor_before_ms(&self) -> Option<i64> {
         self.anchor
             .and_then(|day| dates::end_of_local_day_ms(day, &chrono::Local))
     }
 
     /// Fetches the next page of the unfiltered list or the filtered one.
-    fn fetch(&mut self, filtered: bool, before: Option<i64>, cx: &mut Context<Self>) {
+    fn fetch(&mut self, filtered: bool, before: Option<Before>, cx: &mut Context<Self>) {
         let filter = if filtered {
             list_filter(self.scope.as_ref(), &self.query)
         } else {
@@ -579,8 +621,23 @@ impl HistoryStore {
                 };
                 feed.loading = false;
                 match result {
-                    Ok(page) => feed.log.append_page(page, page_size),
-                    Err(error) => feed.error = Some(error),
+                    Ok(page) => {
+                        feed.failures = 0;
+                        feed.log.append_page(page, page_size);
+                    }
+                    Err(error) => {
+                        // Tries again by itself, backing off as the
+                        // now-playing strip does, so a list that failed
+                        // to load (asleep, offline) fills in once the
+                        // Worker answers.
+                        feed.failures += 1;
+                        let wait = now_playing::next_delay(&Err(error.clone()), feed.failures);
+                        feed.error = Some(error);
+                        feed._task = Some(cx.spawn(async move |this, cx| {
+                            cx.background_executor().timer(wait).await;
+                            this.update(cx, |this, cx| this.recover(filtered, cx)).ok();
+                        }));
+                    }
                 }
                 this.update_unsaved();
                 cx.notify();
@@ -607,6 +664,13 @@ mod tests {
             played_at_ms: ms,
             track_id: track.into(),
             ..Play::default()
+        }
+    }
+
+    fn page(plays: Vec<Play>) -> PlaysPage {
+        PlaysPage {
+            plays,
+            next_before: None,
         }
     }
 
@@ -669,19 +733,19 @@ mod tests {
     #[test]
     fn short_page_ends_history() {
         let mut log = PlayLog::default();
-        log.append_page(vec![play(30, "a"), play(20, "b")], 3);
+        log.append_page(page(vec![play(30, "a"), play(20, "b")]), 3);
         assert!(log.is_exhausted());
-        assert_eq!(log.next_before(), Some(21));
+        assert_eq!(log.next_before(), Some(Before::Ms(21)));
     }
 
     #[test]
     fn overlapping_pages_do_not_duplicate_and_keep_same_millisecond_plays() {
         let mut log = PlayLog::default();
-        log.append_page(vec![play(30, "a"), play(20, "b")], 2);
+        log.append_page(page(vec![play(30, "a"), play(20, "b")]), 2);
         assert!(!log.is_exhausted());
         // The next request uses before=21, so the boundary row comes back
         // along with a different track that shares its timestamp.
-        log.append_page(vec![play(20, "b"), play(20, "c")], 2);
+        log.append_page(page(vec![play(20, "b"), play(20, "c")]), 2);
         let ids: Vec<_> = log.plays().iter().map(|p| p.track_id.as_str()).collect();
         assert_eq!(ids, ["a", "b", "c"]);
         assert!(!log.is_exhausted());
@@ -690,8 +754,8 @@ mod tests {
     #[test]
     fn full_page_of_repeats_stops_paging() {
         let mut log = PlayLog::default();
-        log.append_page(vec![play(20, "a"), play(20, "b")], 2);
-        log.append_page(vec![play(20, "a"), play(20, "b")], 2);
+        log.append_page(page(vec![play(20, "a"), play(20, "b")]), 2);
+        log.append_page(page(vec![play(20, "a"), play(20, "b")]), 2);
         assert!(log.is_exhausted());
         assert_eq!(log.plays().len(), 2);
     }
@@ -699,7 +763,7 @@ mod tests {
     #[test]
     fn newer_plays_go_on_top_without_duplicates() {
         let mut log = PlayLog::default();
-        log.append_page(vec![play(30, "a"), play(20, "b")], 10);
+        log.append_page(page(vec![play(30, "a"), play(20, "b")]), 10);
         assert_eq!(log.newest_ms(), Some(30));
         // The store asks from one millisecond early, so a repeat is normal.
         assert_eq!(
@@ -713,7 +777,7 @@ mod tests {
     #[test]
     fn full_page_of_newer_plays_asks_for_a_reload() {
         let mut log = PlayLog::default();
-        log.append_page(vec![play(10, "a")], 10);
+        log.append_page(page(vec![play(10, "a")]), 10);
         assert_eq!(
             log.prepend_page(vec![play(30, "c"), play(20, "b")], 2),
             None
@@ -728,7 +792,7 @@ mod tests {
     #[test]
     fn only_plays_newer_than_the_newest_stored_one_are_unsaved() {
         let mut log = PlayLog::default();
-        log.append_page(vec![play(30, "a"), play(20, "b")], 10);
+        log.append_page(page(vec![play(30, "a"), play(20, "b")]), 10);
         // Spotify's list overlaps the stored rows: 30/a is already stored,
         // and 25/x is older than the newest stored play, so it is either
         // stored already under the Worker's own dedupe or never will be.
@@ -748,7 +812,7 @@ mod tests {
     #[test]
     fn a_play_once_stored_stops_being_unsaved() {
         let mut log = PlayLog::default();
-        log.append_page(vec![play(30, "a")], 10);
+        log.append_page(page(vec![play(30, "a")]), 10);
         let live = [play(40, "c"), play(30, "a")];
         assert_eq!(ids(&unsaved_plays(&live, &log)), ["c"]);
         // The next check finds the Worker stored it.
@@ -788,6 +852,34 @@ mod tests {
             ..RecentlyPlayedItem::default()
         };
         assert!(live_play(&item).is_none());
+    }
+
+    #[test]
+    fn the_workers_cursor_is_used_when_it_sends_one() {
+        let mut log = PlayLog::default();
+        log.append_page(
+            PlaysPage {
+                plays: vec![play(30, "a"), play(20, "b")],
+                next_before: Some("20:b".into()),
+            },
+            2,
+        );
+        assert_eq!(log.next_before(), Some(Before::Cursor("20:b".into())));
+        // A Worker without cursors falls back to the timestamp.
+        log.append_page(page(vec![play(10, "c"), play(5, "d")]), 2);
+        assert_eq!(log.next_before(), Some(Before::Ms(6)));
+    }
+
+    #[test]
+    fn plays_responses_decode_with_and_without_a_cursor() {
+        let with: crate::models::PlaysResponse =
+            serde_json::from_str(r#"{"plays":[],"next_before":"abc"}"#).unwrap();
+        assert_eq!(with.next_before.as_deref(), Some("abc"));
+        let done: crate::models::PlaysResponse =
+            serde_json::from_str(r#"{"plays":[],"next_before":null}"#).unwrap();
+        assert_eq!(done.next_before, None);
+        let old: crate::models::PlaysResponse = serde_json::from_str(r#"{"plays":[]}"#).unwrap();
+        assert_eq!(old.next_before, None);
     }
 
     #[test]

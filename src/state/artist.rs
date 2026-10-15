@@ -62,7 +62,10 @@ impl ArtistStore {
         let tz = dates::system_timezone();
         self._task = Some(state::fetch(
             cx,
-            async move { client.artist(&id, &tz).await },
+            move || {
+                let (client, id, tz) = (client.clone(), id.clone(), tz.clone());
+                async move { client.artist(&id, &tz).await }
+            },
             |s| &mut s.history,
         ));
         self.fetch_daily(cx);
@@ -80,7 +83,10 @@ impl ArtistStore {
         let filter = PlayFilter::artist(&id);
         self._daily_task = Some(state::fetch(
             cx,
-            async move { client.daily(&range, &tz, &filter).await },
+            move || {
+                let (client, tz, filter) = (client.clone(), tz.clone(), filter.clone());
+                async move { client.daily(&range, &tz, &filter).await }
+            },
             |s| &mut s.daily.days,
         ));
     }

@@ -29,7 +29,10 @@ impl TopOverTimeStore {
         let client = self.client.clone();
         self._task = Some(state::fetch(
             cx,
-            async move { client.top_over_time().await },
+            move || {
+                let client = client.clone();
+                async move { client.top_over_time().await }
+            },
             |s| &mut s.top,
         ));
     }

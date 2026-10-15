@@ -7,9 +7,12 @@
 //! fields before, and a missing field must not blank the strip.
 //!
 //! The history, stats, Wrapped and concert shapes further down follow the
-//! Worker's `main` branch. Every field defaults, so a Worker a version
-//! behind or ahead (a renamed key, a new field) still decodes and only the
-//! missing figure goes blank.
+//! Worker's `main` branch. A response's own fields, which the Worker has
+//! sent since the route existed, are required: a renamed one fails loudly
+//! as "Unexpected response" rather than quietly blanking a page. Fields
+//! added later, and the fields of rows inside a response, default, so a
+//! Worker a version behind still decodes and only the missing figure goes
+//! blank. `Option` fields are null or absent without a default.
 
 use std::collections::BTreeMap;
 
@@ -106,6 +109,10 @@ pub struct FilterEcho {
 #[derive(Debug, Clone, Deserialize)]
 pub struct PlaysResponse {
     pub plays: Vec<Play>,
+    /// The `before` for the next page, opaque; null after the last page and
+    /// absent from Workers older than it.
+    #[serde(default)]
+    pub next_before: Option<String>,
     #[serde(flatten)]
     pub filter: FilterEcho,
 }
@@ -338,7 +345,6 @@ pub struct ArtistName {
 /// `GET /api/artist`. Credit is the primary artist's only, as in every stat.
 /// `minutes` is the Worker's estimate (skips count for nothing).
 #[derive(Debug, Clone, Default, Deserialize)]
-#[serde(default)]
 pub struct ArtistHistory {
     pub artist: ArtistName,
     pub plays: u32,
@@ -362,7 +368,6 @@ pub struct TrackName {
 
 /// `GET /api/track`, every edition of the song folded together.
 #[derive(Debug, Clone, Default, Deserialize)]
-#[serde(default)]
 pub struct TrackHistory {
     pub track: TrackName,
     pub plays: u32,
@@ -374,25 +379,19 @@ pub struct TrackHistory {
 
 /// `GET /api/top-tracks`: the songs counterpart of `/api/top-artists`.
 #[derive(Debug, Clone, Default, Deserialize)]
-#[serde(default)]
 pub struct TopTracksResponse {
-    pub from: String,
-    pub to: String,
-    pub tz: String,
     pub tracks: Vec<RankedSong>,
 }
 
 /// `GET /api/on-this-day`: the same calendar date in each earlier year,
 /// newest year first; years with no plays are left out.
 #[derive(Debug, Clone, Default, Deserialize)]
-#[serde(default)]
 pub struct OnThisDay {
     pub date: String,
     pub years: Vec<OnThisDayYear>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
-#[serde(default)]
 pub struct OnThisDayYear {
     pub year: i32,
     pub plays: u32,
@@ -401,9 +400,7 @@ pub struct OnThisDayYear {
 
 /// `GET /api/search`: stored artists and songs whose name contains `q`.
 #[derive(Debug, Clone, Default, Deserialize)]
-#[serde(default)]
 pub struct SearchResponse {
-    pub q: Option<String>,
     pub artists: Vec<SearchArtist>,
     pub tracks: Vec<SearchTrack>,
 }
@@ -447,7 +444,6 @@ pub const ARTIST_NAME_PREFIX: &str = "name:";
 /// `GET /api/stats/on-repeat`: songs played far more than usual over the
 /// last `window_days` whole local days.
 #[derive(Debug, Clone, Default, Deserialize)]
-#[serde(default)]
 pub struct OnRepeat {
     pub as_of: String,
     pub window_days: u32,
@@ -491,9 +487,7 @@ pub struct MonthSpan {
 /// `GET /api/stats/rhythm`: listening streaks and time of day, in each
 /// era's local time, overall and per calendar year.
 #[derive(Debug, Clone, Default, Deserialize)]
-#[serde(default)]
 pub struct Rhythm {
-    pub as_of: String,
     pub range: MonthSpan,
     /// One set per play-count threshold (1, 10 and 25 plays a day).
     pub streaks: Vec<StreakSet>,
@@ -554,10 +548,8 @@ pub struct RhythmYear {
 /// `GET /api/stats/top-over-time`: leaders per UTC quarter and per year,
 /// credited to the primary artist only.
 #[derive(Debug, Clone, Default, Deserialize)]
-#[serde(default)]
 pub struct TopOverTime {
     pub as_of: String,
-    pub attribution: String,
     pub quarters: Vec<Period>,
     pub years: Vec<Period>,
     /// The most-played artists overall, ordered by when they peaked.
@@ -688,7 +680,6 @@ pub struct ShareChange {
 /// `GET /api/stats/albums`: most-played albums with at least `min_songs`
 /// different songs played, all time and per UTC year.
 #[derive(Debug, Clone, Default, Deserialize)]
-#[serde(default)]
 pub struct TopAlbums {
     pub as_of: String,
     pub min_songs: u32,
@@ -723,14 +714,12 @@ pub struct TopAlbumsYear {
 
 /// `GET /api/wrapped/ranges`: what a read token may ask `/api/wrapped` for.
 #[derive(Debug, Clone, Default, Deserialize)]
-#[serde(default)]
 pub struct WrappedRanges {
     /// Newest first: this year so far, then each closed year with plays.
     pub ranges: Vec<WrappedPreset>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
-#[serde(default)]
 pub struct WrappedPreset {
     /// Local `YYYY-MM-DD` days, inclusive.
     pub from: String,
@@ -740,16 +729,15 @@ pub struct WrappedPreset {
     pub kind: String,
     /// Whether the Worker already holds this summary. One that is not
     /// computes on request, which can take several seconds.
+    #[serde(default)]
     pub computed: bool,
 }
 
 /// `GET /api/wrapped`: a year-in-review for a closed range. Minutes are
 /// estimates; songs rank by plays, artists and albums by minutes.
 #[derive(Debug, Clone, Default, Deserialize)]
-#[serde(default)]
 pub struct Wrapped {
     pub range: WrappedRange,
-    pub computed_at: String,
     pub totals: WrappedTotals,
     pub biggest_day: Option<BiggestDay>,
     /// Minutes in each local hour, 0–23.
@@ -902,9 +890,9 @@ pub struct DayStreak {
 /// each region the Worker is configured to watch. Region keys are whatever
 /// the deployment chose; label them through `regions`.
 #[derive(Debug, Clone, Default, Deserialize)]
-#[serde(default)]
 pub struct ConcertsResponse {
     /// Absent from Workers older than configurable regions.
+    #[serde(default)]
     pub regions: Vec<ConcertRegion>,
     /// Region key → ISO instant it was last fetched in full.
     pub checked: BTreeMap<String, String>,
@@ -987,6 +975,22 @@ pub fn join_names(names: &[NamedRef]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_renamed_response_field_fails_rather_than_blanking() {
+        // `years` renamed: the page must say the response is unexpected.
+        assert!(serde_json::from_str::<OnThisDay>(r#"{"date":"2026-10-15","yrs":[]}"#).is_err());
+        assert!(serde_json::from_str::<OnThisDay>(r#"{"date":"2026-10-15","years":[]}"#).is_ok());
+        // A field added later still defaults for an older Worker.
+        let preset: WrappedPreset = serde_json::from_str(
+            r#"{"from":"2025-01-01","to":"2025-12-31","label":"2025","kind":"year"}"#,
+        )
+        .unwrap();
+        assert!(!preset.computed);
+        let concerts: ConcertsResponse =
+            serde_json::from_str(r#"{"checked":{},"concerts":[]}"#).unwrap();
+        assert!(concerts.regions.is_empty());
+    }
 
     fn image(width: Option<u32>, url: &str) -> ImageRef {
         ImageRef {

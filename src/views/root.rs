@@ -82,15 +82,20 @@ impl AppRoot {
         }
     }
 
+    /// Settings start from the running client: it holds exactly the URL and
+    /// token that were loaded or saved, so there is nothing to re-read and no
+    /// second Keychain prompt. Without one (still in setup) they start empty.
     fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        cx.spawn_in(window, async move |this, cx| {
-            let (config, token, _) = cx.background_spawn(async { load_saved() }).await;
-            this.update_in(cx, |this, window, cx| {
-                this.show_setup(config, token, None, window, cx)
-            })
-            .ok();
-        })
-        .detach();
+        let (config, token) = match &self.client {
+            Some(client) => (
+                Some(Config {
+                    worker_url: client.base_url().to_string(),
+                }),
+                Some(client.token().clone()),
+            ),
+            None => (None, None),
+        };
+        self.show_setup(config, token, None, window, cx);
     }
 
     fn show_main(&mut self, client: ApiClient, window: &mut Window, cx: &mut Context<Self>) {

@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use gpui::{Context, Task};
+use gpui::{Context, Subscription, Task};
 
 use crate::api::{ApiClient, ApiError};
 use crate::runtime;
@@ -36,16 +36,23 @@ pub struct CsvExport {
     lines: Arc<AtomicU64>,
     _task: Option<Task<()>>,
     _progress: Option<Task<()>>,
+    _quit: Subscription,
 }
 
 impl CsvExport {
-    pub fn new(client: ApiClient) -> Self {
+    pub fn new(client: ApiClient, cx: &mut Context<Self>) -> Self {
         Self {
             client,
             state: ExportState::Idle,
             lines: Arc::default(),
             _task: None,
             _progress: None,
+            // Quitting exits without dropping this entity or aborting the
+            // download, which would leave its `.part` file behind.
+            _quit: cx.on_app_quit(|this, cx| {
+                this.cancel(cx);
+                async {}
+            }),
         }
     }
 
@@ -71,7 +78,7 @@ impl CsvExport {
         self._task = Some(cx.spawn(async move |this, cx| {
             // Cancellable: dropping this task (Cancel, or a new export)
             // stops the download rather than letting it run on unseen.
-            let result = runtime::run_cancellable(async move {
+            let result = runtime::run(async move {
                 let part = partial_path(&target);
                 let outcome = download(&client, url, &part, &target, lines).await;
                 if outcome.is_err() {
@@ -116,10 +123,17 @@ impl CsvExport {
     pub fn cancel(&mut self, cx: &mut Context<Self>) {
         self._task = None;
         self._progress = None;
-        if let ExportState::Running { path, .. } = &self.state {
-            let _ = std::fs::remove_file(partial_path(path));
+        if self.is_running() {
+            self.remove_partial();
             self.state = ExportState::Idle;
             cx.notify();
+        }
+    }
+
+    /// Removes the partial file of an export still running.
+    fn remove_partial(&self) {
+        if let ExportState::Running { path, .. } = &self.state {
+            let _ = std::fs::remove_file(partial_path(path));
         }
     }
 
@@ -129,6 +143,14 @@ impl CsvExport {
             self.state = ExportState::Idle;
             cx.notify();
         }
+    }
+}
+
+/// Closing the window drops the export (and so aborts its download) without
+/// a `cancel`; the partial file goes with it.
+impl Drop for CsvExport {
+    fn drop(&mut self) {
+        self.remove_partial();
     }
 }
 
