@@ -9,10 +9,12 @@ jobs:
   check:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         with:
+          # Pinned by commit, the action cannot read the toolchain from its ref.
+          toolchain: stable
           components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Check script
-        run: cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
+        run: cargo fmt --check && cargo clippy --locked --all-targets -- -D warnings && cargo test --locked

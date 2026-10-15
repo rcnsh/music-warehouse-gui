@@ -1,0 +1,26 @@
+# Weekly update PRs for crates and the pinned actions. The GPUI crates are
+# pinned exactly and upgraded together by hand (see CLAUDE.md), so
+# Dependabot leaves them alone.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    ignore:
+      - dependency-name: gpui-pre*
+      - dependency-name: gpui-component
+      - dependency-name: gpui-base
+      - dependency-name: gpui-kit-assets
+    groups:
+      cargo:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
