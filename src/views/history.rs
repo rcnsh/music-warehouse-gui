@@ -1,3 +1,4 @@
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use chrono::NaiveDate;
@@ -22,13 +23,16 @@ use crate::actions::{CopyPlay, OpenInSpotify};
 use crate::api::ApiClient;
 use crate::dates;
 use crate::models::{Play, Rendition, album_rendition};
-use crate::state::history::HistoryStore;
+use crate::state::export::{self, CsvExport, ExportState};
+use crate::state::history::{HistoryStore, Scope};
 use crate::views::{play_detail, widgets};
 
 const COL_ART: usize = 0;
 const COL_TIME: usize = 1;
 const COL_TRACK: usize = 2;
 const COL_ARTIST: usize = 3;
+const COL_ALBUM: usize = 4;
+const COL_FROM: usize = 5;
 
 /// How long typing has to pause before the filter goes to the Worker. Every
 /// search sent costs Worker reads even if the user has typed on, so a word
@@ -138,9 +142,33 @@ fn unsaved_time(play: &Play, cx: &App) -> AnyElement {
 
 const UNSAVED_LABEL: &str = "Not saved yet";
 
+/// The track column for a song's first ever play: the name, then a small
+/// mark that stays visible however far the name is truncated.
+fn first_play_track(name: SharedString, cx: &App) -> AnyElement {
+    let accent = cx.theme().primary;
+    h_flex()
+        .gap_1p5()
+        .overflow_hidden()
+        .child(div().min_w_0().truncate().child(name))
+        .child(
+            div()
+                .flex_shrink_0()
+                .px_1()
+                .rounded_sm()
+                .border_1()
+                .border_color(accent.opacity(0.5))
+                .text_xs()
+                .text_color(accent)
+                .child(FIRST_PLAY_LABEL),
+        )
+        .into_any_element()
+}
+
+const FIRST_PLAY_LABEL: &str = "First play";
+
 impl TableDelegate for PlaysTable {
     fn columns_count(&self, _: &App) -> usize {
-        5
+        6
     }
 
     fn rows_count(&self, _: &App) -> usize {
@@ -150,10 +178,11 @@ impl TableDelegate for PlaysTable {
     fn column(&self, col_ix: usize, _: &App) -> Column {
         match col_ix {
             COL_ART => Column::new("art", "").width(px(44.)).resizable(false),
-            COL_TIME => Column::new("time", "Played").width(px(190.)),
+            COL_TIME => Column::new("time", "Played").width(px(180.)),
             COL_TRACK => Column::new("track", "Track").width(px(320.)),
-            COL_ARTIST => Column::new("artist", "Artist").width(px(240.)),
-            _ => Column::new("album", "Album").width(px(280.)),
+            COL_ARTIST => Column::new("artist", "Artist").width(px(220.)),
+            COL_ALBUM => Column::new("album", "Album").width(px(240.)),
+            _ => Column::new("from", "From").width(px(200.)),
         }
     }
 
@@ -188,12 +217,19 @@ impl TableDelegate for PlaysTable {
             ),
             COL_TRACK => text_or(&play.track_name, "Unknown track"),
             COL_ARTIST => text_or(&play.artists, "Unknown artist"),
-            _ => text_or(&play.album_name, "No album info"),
+            COL_ALBUM => text_or(&play.album_name, "No album info"),
+            _ => (play_detail::context_short(play).into(), false),
         };
+        if col_ix == COL_TRACK && !is_missing && play.first_play == Some(true) {
+            return first_play_track(text, cx);
+        }
         div()
             .truncate()
             // Unsaved rows are muted throughout, so they read as provisional.
-            .when(col_ix == COL_TIME || unsaved, |this| this.text_color(muted))
+            .when(
+                col_ix == COL_TIME || col_ix == COL_FROM || unsaved,
+                |this| this.text_color(muted),
+            )
             .when(is_missing, |this| this.text_color(muted).italic())
             .child(text)
             .into_any_element()
@@ -210,9 +246,14 @@ impl TableDelegate for PlaysTable {
                 dates::format_played_at(play.played_at_ms, &chrono::Local)
             ),
             COL_TIME => dates::format_played_at(play.played_at_ms, &chrono::Local),
+            COL_TRACK if play.first_play == Some(true) => format!(
+                "{} ({FIRST_PLAY_LABEL})",
+                play.track_name.as_deref().unwrap_or_default()
+            ),
             COL_TRACK => play.track_name.clone().unwrap_or_default(),
             COL_ARTIST => play.artists.clone().unwrap_or_default(),
-            _ => play.album_name.clone().unwrap_or_default(),
+            COL_ALBUM => play.album_name.clone().unwrap_or_default(),
+            _ => play_detail::context_short(play),
         }
     }
 
@@ -240,7 +281,7 @@ impl TableDelegate for PlaysTable {
         cx: &mut Context<TableState<Self>>,
     ) -> impl IntoElement {
         let store = self.store.read(cx);
-        let Some(query) = store.query().map(str::to_owned) else {
+        if !store.is_filtered() {
             return widgets::state_panel(
                 Some(Icon::new(IconName::Inbox)),
                 "No plays stored yet",
@@ -249,25 +290,44 @@ impl TableDelegate for PlaysTable {
                 cx,
             )
             .into_any_element();
-        };
+        }
         let day = widgets::day;
-        let scope = match (store.since(), store.anchor()) {
+        let span = match (store.since(), store.anchor()) {
             (Some(from), Some(to)) => {
-                format!("Searched every play from {} to {}.", day(from), day(to))
+                format!("Looked at every play from {} to {}.", day(from), day(to))
             }
-            (Some(from), None) => format!("Searched every play since {}.", day(from)),
-            (None, Some(to)) => format!("Searched every play up to {}.", day(to)),
-            (None, None) => "Searched every stored play.".to_owned(),
+            (Some(from), None) => format!("Looked at every play since {}.", day(from)),
+            (None, Some(to)) => format!("Looked at every play up to {}.", day(to)),
+            (None, None) => "Looked at every stored play.".to_owned(),
+        };
+        let of = store.scope().map(Scope::display_name);
+        let (title, detail) = match (store.query(), of) {
+            (Some(query), None) => (
+                format!("No plays match “{query}”"),
+                format!("{span} Track, artist and album names are matched."),
+            ),
+            (Some(query), Some(of)) => (
+                format!("No plays of {of} match “{query}”"),
+                format!("{span} Track, artist and album names are matched."),
+            ),
+            (None, Some(of)) => (format!("No plays of {of}"), span),
+            (None, None) => ("No plays".to_owned(), span),
         };
         widgets::state_panel(
             Some(Icon::new(IconName::Search)),
-            format!("No plays match “{query}”"),
-            Some(format!("{scope} Track, artist and album names are matched.").into()),
+            title,
+            Some(detail.into()),
             None,
             cx,
         )
         .into_any_element()
     }
+}
+
+fn file_name(path: &Path) -> String {
+    path.file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.display().to_string())
 }
 
 fn text_or(value: &Option<String>, fallback: &'static str) -> (SharedString, bool) {
@@ -288,12 +348,17 @@ pub struct HistoryView {
     since_error: Option<SharedString>,
     /// Set while the filter holds too little text to search.
     filter_too_short: bool,
+    export: Entity<CsvExport>,
+    /// Whether the finished export's notification has been shown, so each
+    /// export announces itself once.
+    export_announced: bool,
     _search_debounce: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
 
 impl HistoryView {
     pub fn new(client: ApiClient, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let export = cx.new(|_| CsvExport::new(client.clone()));
         let store = cx.new(|cx| HistoryStore::new(client, cx));
         let delegate = PlaysTable {
             store: store.clone(),
@@ -306,7 +371,7 @@ impl HistoryView {
                 .sortable(false)
         });
         let filter = cx.new(|cx| {
-            InputState::new(window, cx).placeholder("Search all plays by track, artist or album")
+            InputState::new(window, cx).placeholder("Search plays by track, artist or album")
         });
 
         let jump = cx.new(|cx| InputState::new(window, cx).placeholder("Go to date"));
@@ -323,6 +388,7 @@ impl HistoryView {
             cx.subscribe_in(&filter, window, Self::on_filter_event),
             cx.subscribe_in(&jump, window, Self::on_jump_event),
             cx.subscribe_in(&since, window, Self::on_since_event),
+            cx.observe_in(&export, window, Self::on_export_changed),
         ];
         Self {
             store,
@@ -333,9 +399,113 @@ impl HistoryView {
             since,
             since_error: None,
             filter_too_short: false,
+            export,
+            export_announced: false,
             _search_debounce: None,
             _subscriptions: subscriptions,
         }
+    }
+
+    /// Every play of one song or artist, from another page: the scope alone,
+    /// from the newest play, whatever History was showing before.
+    pub fn show_scope(&mut self, scope: Scope, window: &mut Window, cx: &mut Context<Self>) {
+        for input in [&self.filter, &self.since, &self.jump] {
+            input.update(cx, |input, cx| input.set_value("", window, cx));
+        }
+        self._search_debounce = None;
+        self.filter_too_short = false;
+        self.jump_error = None;
+        self.since_error = None;
+        self.store
+            .update(cx, |store, cx| store.show_scope(scope, cx));
+        self.reset_table(cx);
+    }
+
+    /// Removes the song or artist scope, keeping any search and dates.
+    fn clear_scope(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.store.update(cx, |store, cx| store.set_scope(None, cx));
+        self.reset_table(cx);
+        self.focus_table(window, cx);
+    }
+
+    /// Asks where to save, then downloads the plays this list shows (its
+    /// search, scope and dates) as CSV.
+    pub fn export_csv(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.export.read(cx).is_running() {
+            window.push_notification(
+                Notification::info("An export is already running. Cancel it to start another."),
+                cx,
+            );
+            return;
+        }
+        let store = self.store.read(cx);
+        let request = store.export_request();
+        let name = export::suggested_name(store.scope().map(Scope::name), store.query());
+        #[cfg(feature = "dev-capture")]
+        if let Some(path) = crate::dev_capture::export_path() {
+            self.export
+                .update(cx, |export, cx| export.start(request, path, cx));
+            return;
+        }
+        let dir = dirs::download_dir()
+            .or_else(dirs::home_dir)
+            .unwrap_or_else(|| PathBuf::from("/"));
+        let answer = cx.prompt_for_new_path(&dir, Some(&name));
+        cx.spawn_in(window, async move |this, cx| {
+            let path = match answer.await {
+                Ok(Ok(Some(path))) => path,
+                // Cancelled, or the panel went away with the window.
+                Ok(Ok(None)) | Err(_) => return,
+                Ok(Err(error)) => {
+                    let message = format!("Could not open the save panel: {error}");
+                    this.update_in(cx, |_, window, cx| {
+                        window.push_notification(Notification::error(message), cx)
+                    })
+                    .ok();
+                    return;
+                }
+            };
+            this.update(cx, |this, cx| {
+                this.export
+                    .update(cx, |export, cx| export.start(request, path, cx))
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Announces a finished or failed export once; the status bar keeps it
+    /// on screen until dismissed.
+    fn on_export_changed(
+        &mut self,
+        export: Entity<CsvExport>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let notification = match &export.read(cx).state {
+            ExportState::Idle | ExportState::Running { .. } => {
+                self.export_announced = false;
+                None
+            }
+            _ if self.export_announced => None,
+            ExportState::Done { path, rows } => Some(Notification::success(format!(
+                "Exported {} to {}",
+                widgets::plural(*rows, "play"),
+                file_name(path)
+            ))),
+            ExportState::Failed { error } => {
+                let copy = widgets::describe(error);
+                Some(Notification::error(format!(
+                    "Export failed. {}: {}",
+                    copy.title, copy.detail
+                )))
+            }
+        };
+        if let Some(notification) = notification {
+            self.export_announced = true;
+            window.push_notification(notification, cx);
+        }
+        cx.notify();
     }
 
     /// Rows are positions, so new plays arriving on top would silently move
@@ -410,7 +580,7 @@ impl HistoryView {
                         self.since_error = None;
                         self.store.update(cx, |store, cx| store.set_since(day, cx));
                         self.reset_table(cx);
-                        if self.store.read(cx).query().is_some() {
+                        if self.store.read(cx).is_filtered() {
                             self.focus_table(window, cx);
                         } else {
                             // A start date alone filters nothing; the search
@@ -561,6 +731,88 @@ impl HistoryView {
         self.reset_table(cx);
     }
 
+    /// "Song: DNA." with a button that widens the list again.
+    fn scope_chip(&self, scope: &Scope, cx: &Context<Self>) -> AnyElement {
+        let icon = match scope {
+            Scope::Song { .. } => IconName::Music,
+            Scope::Artist { .. } => IconName::MicVocal,
+        };
+        h_flex()
+            .flex_shrink_0()
+            .max_w(px(260.))
+            .gap_1()
+            .pl_2()
+            .rounded_md()
+            .border_1()
+            .border_color(cx.theme().primary.opacity(0.5))
+            .bg(cx.theme().primary.opacity(0.08))
+            .text_sm()
+            .child(Icon::new(icon).small().text_color(cx.theme().primary))
+            .child(div().min_w_0().truncate().child(scope.label()))
+            .child(
+                Button::new("clear-scope")
+                    .xsmall()
+                    .ghost()
+                    .icon(IconName::X)
+                    .tooltip("Show every song and artist again")
+                    .on_click(cx.listener(|this, _, window, cx| this.clear_scope(window, cx))),
+            )
+            .into_any_element()
+    }
+
+    /// Progress of a CSV export, or how the last one ended, until dismissed.
+    fn export_status(&self, cx: &Context<Self>) -> Option<AnyElement> {
+        let row = h_flex().gap_2().items_center();
+        let element = match &self.export.read(cx).state {
+            ExportState::Idle => return None,
+            ExportState::Running { rows, .. } => row
+                .child(format!("Exporting CSV… {}", widgets::plural(*rows, "play")))
+                .child(
+                    Button::new("export-cancel")
+                        .xsmall()
+                        .ghost()
+                        .label("Cancel")
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.export.update(cx, |export, cx| export.cancel(cx))
+                        })),
+                ),
+            ExportState::Done { path, rows } => {
+                let reveal = path.clone();
+                row.child(format!(
+                    "Exported {} to {}",
+                    widgets::plural(*rows, "play"),
+                    file_name(path)
+                ))
+                .child(
+                    Button::new("export-reveal")
+                        .xsmall()
+                        .ghost()
+                        .label("Show in Finder")
+                        .on_click(move |_, _, cx| cx.reveal_path(&reveal)),
+                )
+            }
+            ExportState::Failed { error } => row.child(
+                div()
+                    .text_color(cx.theme().danger)
+                    .child(format!("Export failed: {}", widgets::describe(error).title)),
+            ),
+        };
+        let dismiss = Button::new("export-dismiss")
+            .xsmall()
+            .ghost()
+            .icon(IconName::X)
+            .tooltip("Hide")
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.export.update(cx, |export, cx| export.dismiss(cx))
+            }));
+        let running = self.export.read(cx).is_running();
+        Some(
+            element
+                .when(!running, |this| this.child(dismiss))
+                .into_any_element(),
+        )
+    }
+
     fn status_text(&self, cx: &App) -> SharedString {
         let store = self.store.read(cx);
         let loaded = store.plays().len();
@@ -568,11 +820,14 @@ impl HistoryView {
             Some(day) => format!("From {} back · ", day.format("%a %-d %b %Y")),
             None => String::new(),
         };
-        match (store.since(), store.query()) {
-            (Some(day), Some(_)) => {
+        match (store.since(), store.is_filtered()) {
+            (Some(day), true) => {
                 prefix.insert_str(0, &format!("Since {} · ", day.format("%a %-d %b %Y")))
             }
-            (Some(_), None) => prefix.insert_str(0, "The start date applies to searches · "),
+            (Some(_), false) => prefix.insert_str(
+                0,
+                "The start date applies to searches and song or artist lists · ",
+            ),
             (None, _) => {}
         }
         if self.filter_too_short {
@@ -584,9 +839,13 @@ impl HistoryView {
             1 => " · 1 play not saved yet".to_owned(),
             n => format!(" · {n} plays not saved yet"),
         };
-        let (noun, all) = match store.query() {
-            Some(_) => ("matching plays", "matching"),
-            None => ("plays", "stored"),
+        let (noun, all) = match (store.scope(), store.query()) {
+            (Some(scope), None) => {
+                let of = format!("plays of {}", scope.display_name());
+                (of.clone(), of)
+            }
+            (_, Some(_)) => ("matching plays".to_owned(), "matching plays".to_owned()),
+            (None, None) => ("plays".to_owned(), "stored plays".to_owned()),
         };
         let n = widgets::count(loaded as u64);
         let text = match (store.is_loading(), store.has_more()) {
@@ -597,7 +856,7 @@ impl HistoryView {
             (false, false) if store.anchor().is_some() => {
                 format!("{n} {noun} loaded · reached the oldest")
             }
-            (false, false) => format!("All {n} {all} plays loaded"),
+            (false, false) => format!("All {n} {all} loaded"),
         };
         format!("{prefix}{text}{suffix}").into()
     }
@@ -649,6 +908,12 @@ impl Render for HistoryView {
             play_detail::render(&play, selected_unsaved, actions, cx)
         });
 
+        let scope_chip = store
+            .scope()
+            .cloned()
+            .map(|scope| self.scope_chip(&scope, cx));
+        let export_status = self.export_status(cx);
+
         v_flex()
             .on_action(cx.listener(Self::open_selected))
             .on_action(cx.listener(Self::copy_selected))
@@ -660,6 +925,7 @@ impl Render for HistoryView {
                     .py_2()
                     .border_b_1()
                     .border_color(cx.theme().border)
+                    .when_some(scope_chip, |this, chip| this.child(chip))
                     .child(
                         div().flex_1().child(
                             Input::new(&self.filter)
@@ -682,6 +948,16 @@ impl Render for HistoryView {
                                 .prefix(Icon::new(IconName::Calendar).small())
                                 .small(),
                         ),
+                    )
+                    .child(
+                        Button::new("export-csv")
+                            .small()
+                            .ghost()
+                            .icon(IconName::Download)
+                            .tooltip("Export these plays as CSV… (⇧⌘E)")
+                            .on_click(
+                                cx.listener(|this, _, window, cx| this.export_csv(window, cx)),
+                            ),
                     )
                     .child(
                         div()
@@ -731,6 +1007,7 @@ impl Render for HistoryView {
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
                     .child(div().flex_1().child(self.status_text(cx)))
+                    .when_some(export_status, |this, status| this.child(status))
                     .when(anchored, |this| {
                         this.child(
                             Button::new("back-to-newest")
