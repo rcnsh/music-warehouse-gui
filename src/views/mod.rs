@@ -13,6 +13,7 @@ pub mod on_this_day;
 pub mod overview;
 pub mod palette;
 pub mod play_detail;
+pub mod recent_days;
 pub mod rhythm;
 pub mod root;
 pub mod setup;
