@@ -198,6 +198,12 @@ impl ApiClient {
         &self.base
     }
 
+    /// The token this client sends, so Settings can show it as the saved one
+    /// without reading the Keychain again.
+    pub fn token(&self) -> &Secret {
+        &self.token
+    }
+
     /// Builds `<base>/api/<route>?<query>`, preserving any path prefix on the
     /// base URL in case the Worker is mounted below the root.
     pub fn endpoint(&self, route: &str, query: &[(&str, String)]) -> Url {

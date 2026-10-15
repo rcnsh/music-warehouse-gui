@@ -38,6 +38,9 @@ enum Status {
         summary: SharedString,
     },
     Failed(SharedString),
+    /// Writing the config file and the Keychain, which can block on an
+    /// access prompt, so it runs off the main thread.
+    Saving,
 }
 
 /// First-run setup, and Settings later. A token comes from signing in with
@@ -152,7 +155,10 @@ impl SetupView {
     }
 
     fn busy(&self) -> bool {
-        matches!(self.status, Status::Testing | Status::SigningIn)
+        matches!(
+            self.status,
+            Status::Testing | Status::SigningIn | Status::Saving
+        )
     }
 
     /// Checks a token against the Worker. A token from signing in is saved as
@@ -272,34 +278,50 @@ impl SetupView {
             return;
         };
         let (url, token) = (url.clone(), token.clone());
-        let Some(dir) = config::config_dir() else {
-            return self.fail("Could not find Application Support.".into(), cx);
-        };
-        let config = Config {
-            worker_url: url.to_string(),
-        };
-        if let Err(e) = config::save_to(&dir, &config) {
-            return self.fail(format!("Could not save settings: {e}"), cx);
-        }
         // Only touch the Keychain when a new token was typed, so keeping the
         // saved one does not re-trigger an access prompt.
-        if self.existing_token.as_ref() != Some(&token)
-            && let Err(message) = config::save_token(&token)
-        {
-            return self.fail(message, cx);
-        }
-        cx.emit(SetupEvent::Saved(ApiClient::new(url, token)));
+        let write_token = self.existing_token.as_ref() != Some(&token);
+        self.status = Status::Saving;
+        cx.notify();
+        self._task = Some(cx.spawn(async move |this, cx| {
+            let saved = {
+                let (url, token) = (url.clone(), token.clone());
+                cx.background_spawn(async move { persist(&url, &token, write_token) })
+                    .await
+            };
+            this.update(cx, |this, cx| match saved {
+                Ok(()) => cx.emit(SetupEvent::Saved(ApiClient::new(url, token))),
+                Err(message) => this.fail(message, cx),
+            })
+            .ok();
+        }));
     }
+}
+
+/// Writes the URL to the config file and, when asked, the token to the
+/// Keychain. Blocking; call it from a background task.
+fn persist(url: &Url, token: &Secret, write_token: bool) -> Result<(), String> {
+    let dir = config::config_dir().ok_or("Could not find Application Support.")?;
+    let config = Config {
+        worker_url: url.to_string(),
+    };
+    config::save_to(&dir, &config).map_err(|e| format!("Could not save settings: {e}"))?;
+    if write_token {
+        config::save_token(token)?;
+    }
+    Ok(())
 }
 
 impl Render for SetupView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let passed = matches!(self.status, Status::Passed { .. });
         let testing = matches!(self.status, Status::Testing);
+        let saving = matches!(self.status, Status::Saving);
         let signing_in = matches!(self.status, Status::SigningIn);
         let status_line = match &self.status {
             Status::Idle => None,
             Status::Testing => Some((IconName::LoaderCircle, "Testing…".into(), false)),
+            Status::Saving => Some((IconName::LoaderCircle, "Saving…".into(), false)),
             Status::SigningIn => Some((
                 IconName::LoaderCircle,
                 "Approve the sign-in in your browser, then come back here.".into(),
@@ -371,7 +393,7 @@ impl Render for SetupView {
                                     .outline()
                                     .icon(IconName::LogIn)
                                     .label("Sign in with Spotify")
-                                    .disabled(testing)
+                                    .disabled(testing || saving)
                                     .on_click(
                                         cx.listener(|this, _, window, cx| this.sign_in(window, cx)),
                                     )
@@ -404,15 +426,23 @@ impl Render for SetupView {
                             .gap_2()
                             .justify_end()
                             .when(self.can_cancel, |this| {
-                                this.child(Button::new("cancel").ghost().label("Cancel").on_click(
-                                    cx.listener(|_, _, _, cx| cx.emit(SetupEvent::Cancelled)),
-                                ))
+                                // A save under way is finishing writes; cancelling
+                                // then would leave them saved but unused.
+                                this.child(
+                                    Button::new("cancel")
+                                        .ghost()
+                                        .label("Cancel")
+                                        .disabled(saving)
+                                        .on_click(cx.listener(|_, _, _, cx| {
+                                            cx.emit(SetupEvent::Cancelled)
+                                        })),
+                                )
                             })
                             .child(
                                 Button::new("test")
                                     .label("Test connection")
                                     .loading(testing)
-                                    .disabled(testing || signing_in)
+                                    .disabled(testing || signing_in || saving)
                                     .when(!passed, |b| b.primary())
                                     .on_click(
                                         cx.listener(|this, _, window, cx| this.test(window, cx)),
@@ -421,6 +451,7 @@ impl Render for SetupView {
                             .child(
                                 Button::new("save")
                                     .label("Save")
+                                    .loading(saving)
                                     .disabled(!passed)
                                     .when(passed, |b| b.primary())
                                     .on_click(cx.listener(|this, _, _, cx| this.save(cx))),
