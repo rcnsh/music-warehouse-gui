@@ -43,8 +43,12 @@ once handled:
 | `capture <name>` | render the window to `<dir>/<name>.png` |
 | `action mwgui::ShowOverview` | dispatch an action by name |
 | `artist <id>`, `track <id>` | open those pages (`artist name:kendrick lamar` works too) |
+| `plays-artist <id> [<name>]`, `plays-track <id> [<name>]` | open History narrowed to every play of that artist or song |
 | `scroll <dy> [<x> <y>]` | scroll by `dy` points, positive down, at the window centre by default |
 | `click <x> <y>` | left-click at a point in the window, in points (a capture's pixels divided by the display scale) |
+
+Set `MWGUI_EXPORT_FILE=/some/file.csv` and Export CSV… writes there without
+the save panel, which a script cannot answer.
 
 Every command activates the window and draws a fresh frame first, and a
 capture keeps drawing for most of a second so chart animations finish. A
@@ -177,14 +181,19 @@ example: it once filtered only loaded rows, and now sends `q` to
 - `src/dates.rs`: range presets and custom-range parsing in the system timezone
 - `src/runtime.rs`: Tokio runtime that reqwest runs on; GPUI tasks await its handles
 - `src/state/`: entities that own fetched data, one module per page;
-  `state::fetch` runs a request into a `Remote<T>`
+  `state::fetch` runs a request into a `Remote<T>`. `history.rs` also owns
+  History's `Scope` (one song or artist) and search, both sent to the Worker
+  as an `api::PlayFilter`; `export.rs` streams `/api/plays.csv` to disk;
+  `RecentDays` in `mod.rs` holds the Artist and Track pages' daily counts
 - `src/views/`: one file per view. `nav.rs` names the pages (`Section`, `Page`,
   sidebar `GROUPS`, Back stack); `shell.rs` holds every page view, the sidebar
-  and top bar; `widgets.rs` holds shared states and page building blocks
+  and top bar; `widgets.rs` holds shared states and page building blocks;
+  `recent_days.rs` is the "Plays per day" card both Artist and Track use
 - `src/ui_state.rs`: window frame, last page and ranges in `ui-state.json`
 - `src/dev_capture.rs`: scripted captures, `dev-capture` builds only
-- `src/actions.rs`: actions (including `OpenArtist { id }` / `OpenTrack { id }`,
-  dispatchable from any view), keybindings, menus
+- `src/actions.rs`: actions (including `OpenArtist { id }` / `OpenTrack { id }`
+  and `ShowPlaysOfArtist` / `ShowPlaysOfTrack`, which open History narrowed to
+  one artist or song, all dispatchable from any view), keybindings, menus
 
 ### Pages
 
@@ -211,7 +220,8 @@ loading, error and loaded states use `page_body` inside a scrolling page and
 To navigate from a page, dispatch an action rather than calling the shell:
 `window.dispatch_action(Box::new(OpenArtist::new(id)), cx)`, or give a
 `widgets::RankedRow` an action. Stats that name an artist without an id use
-`OpenArtist::by_name(name)`; the client sends the `name:` placeholder and its
+`OpenArtist::by_name(name)` (or `OpenArtist::by_id_or_name` when the id may be
+missing on an older Worker); the client sends the `name:` placeholder and its
 name, and the Worker folds it into the real artist. The ⌘K palette
 (`views/palette.rs`) gets the client from the shell when it opens.
 

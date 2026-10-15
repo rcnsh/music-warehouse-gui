@@ -23,9 +23,17 @@ displays data; the Worker does the polling, storage and aggregation.
   searches at once and moves to the list, j/k move. New plays appear at the
   top within five minutes of the Worker storing them, while the window is
   visible, and plays Spotify reports that the Worker has not stored yet show
-  above them marked "Not saved yet". Selecting a play shows its details; `o`
-  opens it in Spotify, ⌘C copies it, and its song and artists open their
-  pages.
+  above them marked "Not saved yet". A "From" column names the album,
+  playlist or artist page each play started from, and a song's first ever
+  play is marked. Selecting a play shows its details, including which play
+  of the song it was ("37th play"); `o` opens it in Spotify, ⌘C copies it,
+  and its song and artists open their pages. "Every play of this song" (or
+  "Show every play" on an Artist or Track page) narrows History to one song
+  or artist, shown as a removable chip; search and dates still apply inside
+  it. **Export CSV…** (⇧⌘E, the File menu, the palette or the toolbar
+  button) saves the plays matching the current song, artist, search and
+  dates to a file you choose, streamed straight to disk with progress in the
+  status bar.
 - **Overview** (⌘2): plays per day, top artists and top songs for 7 days, 30
   days, a year or a custom range, bucketed by the Worker in the system
   timezone, beside Spotify's own live top lists with artist photos and album
@@ -49,8 +57,9 @@ displays data; the Worker does the polling, storage and aggregation.
 - **Concerts** (⌘0): upcoming shows for the artists you play most, in the
   regions the Worker is configured for.
 - **Artist and Track pages**: all-time plays, listening time, first and last
-  play, plays per month and (for artists) their most-played songs. Opened by
-  clicking an artist or song anywhere in the app.
+  play, plays per day over the last 30 days, 90 days or year, plays per month
+  and (for artists) their most-played songs. Opened by clicking an artist or
+  song anywhere in the app, including Wrapped, Top Over Time and Concerts.
 - **Back** (⌘[ or the arrow in the top bar) returns to the previous page.
 - **Now playing** strip, polled every 20–30 seconds. It backs off on errors and
   pauses while the window is hidden.
@@ -128,6 +137,7 @@ variables:
 | `MWGUI_DEV_TOKEN_FILE` | Path to a dotenv file (such as the Worker's `.dev.vars`). Only its `READ_TOKEN=` line is used, instead of the Keychain. |
 | `MWGUI_CAPTURE_DIR` | Directory the app watches for `request` files to save window PNGs, dispatch actions, scroll and click. See `src/dev_capture.rs`. |
 | `MWGUI_UI_STATE_FILE` | Path to use instead of `ui-state.json`, so scripted runs leave the real window state alone. |
+| `MWGUI_EXPORT_FILE` | Path Export CSV… writes to without showing the save panel, so scripted runs can export. |
 
 ## Worker
 
@@ -136,8 +146,9 @@ The app talks to these Worker routes, all with
 
 | Route | Used for |
 |---|---|
-| `GET /api/plays` | History, paging with `before` and new rows with `after` |
-| `GET /api/daily` | Overview chart |
+| `GET /api/plays` | History, paging with `before` and new rows with `after`; `q`, `track_id` and `artist_id` narrow it |
+| `GET /api/plays.csv` | Export CSV…, with the same filters and bounds as History |
+| `GET /api/daily` | Overview chart, and with `track_id` or `artist_id` the Artist and Track pages' plays per day |
 | `GET /api/top-artists` | Overview top artists |
 | `GET /api/top` | Spotify's live top lists |
 | `GET /api/now-playing` | Now playing strip |
