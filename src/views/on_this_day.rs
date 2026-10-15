@@ -172,7 +172,7 @@ impl Render for OnThisDayView {
             .track_focus(&self.focus)
             .child(widgets::page_header(
                 "On This Day",
-                Some(subtitle(shown, dates::today_local()).into()),
+                Some(subtitle(store.described_date(), dates::today_local()).into()),
                 Some(controls),
                 cx,
             ))

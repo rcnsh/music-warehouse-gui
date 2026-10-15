@@ -31,6 +31,18 @@ impl OnThisDayStore {
         self.date.unwrap_or_else(dates::today_local)
     }
 
+    /// The day the loaded years belong to, which is what the page describes.
+    /// Following today, that is the Worker's answer rather than the clock,
+    /// so the page does not name tomorrow at midnight before its data moves.
+    pub fn described_date(&self) -> NaiveDate {
+        if self.date.is_none()
+            && let Some(day) = self.day.data.as_ref().and_then(|d| d.date.parse().ok())
+        {
+            return day;
+        }
+        self.shown_date()
+    }
+
     /// Moves to another day. Today's date is stored as `None` so the page
     /// keeps following the calendar if it stays open past midnight.
     pub fn set_date(&mut self, date: NaiveDate, cx: &mut Context<Self>) {
