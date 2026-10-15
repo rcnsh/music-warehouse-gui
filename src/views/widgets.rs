@@ -355,8 +355,14 @@ pub struct RankedRow {
     subtitle: Option<SharedString>,
     value: Option<SharedString>,
     share: Option<f32>,
+    value_width: Pixels,
     action: Option<Box<dyn Action>>,
 }
+
+/// The value column's default width, enough for `12 h 34 min` or `12,345`.
+/// Fixed rather than fitted, so the bars of rows with longer and shorter
+/// values still line up.
+pub const RANKED_VALUE_WIDTH: Pixels = px(84.);
 
 impl RankedRow {
     pub fn new(id: impl Into<ElementId>, title: impl Into<SharedString>) -> Self {
@@ -368,6 +374,7 @@ impl RankedRow {
             subtitle: None,
             value: None,
             share: None,
+            value_width: RANKED_VALUE_WIDTH,
             action: None,
         }
     }
@@ -392,6 +399,14 @@ impl RankedRow {
     /// The count on the right, already formatted ([`count`], [`minutes`]).
     pub fn value(mut self, value: impl Into<SharedString>) -> Self {
         self.value = Some(value.into());
+        self
+    }
+
+    /// Width of the value column, for lists whose values are much shorter
+    /// (`7%`) or longer than [`RANKED_VALUE_WIDTH`] allows. Use the same width
+    /// for every row of a list.
+    pub fn value_width(mut self, width: Pixels) -> Self {
+        self.value_width = width;
         self
     }
 
@@ -451,9 +466,10 @@ impl RenderOnce for RankedRow {
             .when_some(self.value, |this, value| {
                 this.child(
                     div()
-                        .min_w(px(56.))
+                        .w(self.value_width)
                         .flex_shrink_0()
                         .text_right()
+                        .truncate()
                         .child(value),
                 )
             })
@@ -499,10 +515,18 @@ pub fn link(
         .child(label.into())
 }
 
+/// The widest a chart bar gets, so a short series across a wide card (one
+/// month of plays, seven weekdays) keeps slim bars like Overview's.
+pub const CHART_BAR_MAX_WIDTH: f32 = 30.;
+
 /// A labelled bar chart over a series (months, hours, quarters), styled like
 /// Overview's daily chart. Labels must be distinct; `name` is what the
 /// tooltip calls the value ("Plays", "Minutes"). Give it a fixed-height
 /// parent, e.g. `div().h(px(220.)).child(...)`.
+///
+/// Unlike Overview's, the value labels sit in a gutter left of the bars
+/// rather than over them: nothing here hit-tests clicks, so the gutter costs
+/// nothing, and inside the plot they cover the first bars.
 pub fn bar_chart(
     id: impl Into<ElementId>,
     points: Vec<(SharedString, f64)>,
@@ -521,7 +545,8 @@ pub fn bar_chart(
         .value_tick_format(|v| format!("{v:.0}"))
         .band_tick_count(bands.clamp(1, 8))
         .grid_dashed(false)
-        .value_axis_label_placement(AxisLabelPlacement::Inside)
+        .value_axis_label_placement(AxisLabelPlacement::Outside)
+        .max_band_width(px(CHART_BAR_MAX_WIDTH))
         .id(id)
 }
 

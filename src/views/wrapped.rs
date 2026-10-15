@@ -453,6 +453,7 @@ fn decades(age: &ListeningAge, cx: &App) -> impl IntoElement {
                 format!("{}s", d.decade),
             )
             .value(widgets::percent(d.share))
+            .value_width(px(48.))
             .share(if max > 0. { (d.share / max) as f32 } else { 0. })
         }))
         .child(widgets::note(

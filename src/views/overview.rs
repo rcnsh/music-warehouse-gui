@@ -153,7 +153,7 @@ impl TableDelegate for ArtistsTable {
 /// the bar the chart's hover is highlighting. BarChart has no click callback.
 const BAR_PADDING_INNER: f32 = 0.4;
 const BAR_PADDING_OUTER: f32 = 0.2;
-const BAR_MAX_WIDTH: f32 = 30.;
+const BAR_MAX_WIDTH: f32 = widgets::CHART_BAR_MAX_WIDTH;
 
 /// The day a click lands on, given its distance from the chart's left edge.
 /// Mirrors BarChart's own hover hit-test, which only lines up because the
