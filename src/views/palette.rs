@@ -29,6 +29,15 @@ use crate::views::widgets;
 /// typed at a normal pace costs one search rather than one per letter.
 const SEARCH_AFTER: Duration = Duration::from_millis(200);
 
+/// The shortest query sent to the Worker. One letter matches nearly every
+/// name, which makes the Worker scan everything for six rows nobody wanted.
+const MIN_SEARCH_CHARS: usize = 2;
+
+/// Whether `query` (trimmed) is long enough to search the history for.
+fn worth_searching(query: &str) -> bool {
+    query.chars().count() >= MIN_SEARCH_CHARS
+}
+
 /// Matches per list. The palette shows a few hundred pixels of rows.
 const SEARCH_LIMIT: u32 = 6;
 
@@ -78,7 +87,7 @@ impl PaletteSearch {
     fn set_query(&mut self, query: &str, window: &mut Window, cx: &mut Context<Self>) {
         let query = query.trim().to_owned();
         let ticket = self.latest.next();
-        if query.is_empty() {
+        if !worth_searching(&query) {
             self._task = None;
             self.matches = Matches::default();
             self.set_loading(false, window, cx);
@@ -90,10 +99,7 @@ impl PaletteSearch {
             cx.background_executor().timer(SEARCH_AFTER).await;
             let q = query.clone();
             let result =
-                runtime::run(
-                    async move { client.search(&q, None, SEARCH_LIMIT).await },
-                )
-                .await;
+                runtime::run(async move { client.search(&q, None, SEARCH_LIMIT).await }).await;
             this.update_in(cx, |this, window, cx| {
                 if !this.latest.is_latest(ticket) {
                     return;
@@ -398,6 +404,15 @@ pub fn open(shell: WeakEntity<Shell>, client: ApiClient, window: &mut Window, cx
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn one_letter_is_not_sent_to_the_worker() {
+        assert!(!worth_searching(""));
+        assert!(!worth_searching("k"));
+        assert!(!worth_searching("岡"));
+        assert!(worth_searching("ke"));
+        assert!(worth_searching("岡部"));
+    }
 
     #[test]
     fn every_command_has_a_distinct_label() {
