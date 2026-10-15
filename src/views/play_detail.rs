@@ -12,7 +12,7 @@ use gpui_component::{
 };
 use gpui_kit_assets::IconName;
 
-use crate::actions::OpenTrack;
+use crate::actions::{OpenArtist, OpenTrack};
 use crate::dates;
 use crate::models::{Play, Rendition, album_rendition};
 use crate::views::widgets;
@@ -69,6 +69,17 @@ fn context_url(uri: &str) -> Option<String> {
     }
 }
 
+/// The credited artists, one per link. Stored rows carry the names joined
+/// as "A, B" without ids, so a name that itself contains ", " is split too;
+/// its halves then open artist pages that find nothing.
+pub fn artist_names(artists: &str) -> Vec<&str> {
+    artists
+        .split(", ")
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .collect()
+}
+
 pub fn format_duration(ms: i64) -> String {
     let seconds = (ms.max(0) + 500) / 1000;
     format!("{}:{:02}", seconds / 60, seconds % 60)
@@ -82,7 +93,9 @@ pub struct DetailActions {
     pub on_close: ClickHandler,
 }
 
-pub fn render(play: &Play, actions: DetailActions, cx: &App) -> AnyElement {
+/// `unsaved` marks a play Spotify reported that the warehouse has not
+/// stored yet.
+pub fn render(play: &Play, unsaved: bool, actions: DetailActions, cx: &App) -> AnyElement {
     let muted = cx.theme().muted_foreground;
     let art = play
         .image_url
@@ -130,14 +143,14 @@ pub fn render(play: &Play, actions: DetailActions, cx: &App) -> AnyElement {
         .child(
             v_flex()
                 .gap_1()
-                .child(
-                    div()
-                        .text_lg()
-                        .font_semibold()
-                        .child(play.track_name.clone().unwrap_or("Unknown track".into())),
-                )
-                .when_some(play.artists.clone(), |this, artists| {
-                    this.child(div().text_sm().child(artists))
+                .child(div().text_lg().font_semibold().child(widgets::link(
+                    "detail-title",
+                    play.track_name.clone().unwrap_or("Unknown track".into()),
+                    OpenTrack::new(play.track_id.clone()),
+                    cx,
+                )))
+                .when_some(play.artists.as_deref(), |this, artists| {
+                    this.child(artist_links(artists, cx))
                 })
                 .child(
                     div()
@@ -146,6 +159,14 @@ pub fn render(play: &Play, actions: DetailActions, cx: &App) -> AnyElement {
                         .child(play.album_name.clone().unwrap_or("No album info".into())),
                 ),
         )
+        .when(unsaved, |this| {
+            this.child(
+                div()
+                    .text_xs()
+                    .text_color(muted)
+                    .child("Not saved yet: Spotify reports this play, and the warehouse stores it at its next poll."),
+            )
+        })
         .child(fact("Played", played_at))
         .when_some(play.duration_ms, |this, ms| {
             this.child(fact("Length", format_duration(ms)))
@@ -191,6 +212,23 @@ pub fn render(play: &Play, actions: DetailActions, cx: &App) -> AnyElement {
             )
         })
         .into_any_element()
+}
+
+/// Each artist a separate link, comma-separated as in the table.
+fn artist_links(artists: &str, cx: &App) -> AnyElement {
+    let mut row = h_flex().flex_wrap().text_sm();
+    for (ix, name) in artist_names(artists).into_iter().enumerate() {
+        if ix > 0 {
+            row = row.child(div().pr_1().child(","));
+        }
+        row = row.child(widgets::link(
+            ("detail-artist", ix),
+            name.to_owned(),
+            OpenArtist::by_name(name),
+            cx,
+        ));
+    }
+    row.into_any_element()
 }
 
 #[cfg(test)]
@@ -242,6 +280,16 @@ mod tests {
         assert_eq!(context_line(&p).0, "Played from search, the queue or radio");
         p.source = Some("export".into());
         assert!(context_line(&p).0.contains("export"));
+    }
+
+    #[test]
+    fn credits_split_into_one_link_per_artist() {
+        assert_eq!(
+            artist_names("Kendrick Lamar, Taylour Paige"),
+            ["Kendrick Lamar", "Taylour Paige"]
+        );
+        assert_eq!(artist_names("SZA"), ["SZA"]);
+        assert!(artist_names("").is_empty());
     }
 
     #[test]
