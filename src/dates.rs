@@ -155,12 +155,18 @@ pub fn today_local() -> NaiveDate {
 }
 
 /// UTC milliseconds at local midnight ending `day`: the exclusive `before`
-/// bound that lists that day's plays first. `None` only if the zone has no
-/// such midnight at all; across a DST gap the earliest valid instant is used.
+/// bound that lists that day's plays first. Across a DST overlap the earlier
+/// midnight is used. Where clocks spring forward at midnight (Chile,
+/// Paraguay, Egypt, Cuba, Lebanon) that midnight does not exist, and the day
+/// starts at the first local time that does, which is the moment of the
+/// change. `None` only if no time in the following three hours exists.
 pub fn end_of_local_day_ms<Tz: TimeZone>(day: NaiveDate, tz: &Tz) -> Option<i64> {
-    let next = day.succ_opt()?.and_hms_opt(0, 0, 0)?;
-    tz.from_local_datetime(&next)
-        .earliest()
+    let start = day.succ_opt()?.and_hms_opt(0, 0, 0)?;
+    // Quarter-hour steps find the end of any real gap, all of which start
+    // and end on one.
+    (0..=12)
+        .map(|step| start + chrono::Duration::minutes(15 * step))
+        .find_map(|local| tz.from_local_datetime(&local).earliest())
         .map(|t| t.timestamp_millis())
 }
 
@@ -305,6 +311,27 @@ mod tests {
         assert_eq!(
             end_of_local_day_ms(d(2026, 10, 6), &sgt),
             Some(1_791_331_200_000 - 8 * 3_600_000)
+        );
+    }
+
+    #[test]
+    fn a_day_ending_in_a_midnight_dst_gap_ends_when_clocks_change() {
+        let santiago = chrono_tz::America::Santiago;
+        // Chile springs forward at midnight: 6 Sep 2026 starts at 01:00.
+        let midnight = d(2026, 9, 6).and_hms_opt(0, 0, 0).unwrap();
+        assert!(santiago.from_local_datetime(&midnight).earliest().is_none());
+        // 00:00 at -04, the same instant as 01:00 at -03.
+        let change = DateTime::parse_from_rfc3339("2026-09-06T04:00:00Z")
+            .unwrap()
+            .timestamp_millis();
+        assert_eq!(end_of_local_day_ms(d(2026, 9, 5), &santiago), Some(change));
+        // An ordinary day there is unaffected.
+        let ordinary = DateTime::parse_from_rfc3339("2026-09-07T03:00:00Z")
+            .unwrap()
+            .timestamp_millis();
+        assert_eq!(
+            end_of_local_day_ms(d(2026, 9, 6), &santiago),
+            Some(ordinary)
         );
     }
 

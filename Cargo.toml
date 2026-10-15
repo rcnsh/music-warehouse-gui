@@ -32,6 +32,10 @@ tokio = { version = "1", features = ["rt-multi-thread", "time", "net", "io-util"
 url = "2"
 image = { version = "0.25", default-features = false, features = ["png"], optional = true }
 
+[dev-dependencies]
+# Real zone rules for testing day bounds across DST changes.
+chrono-tz = "0.10"
+
 [features]
 # Renders the window to PNG on request for screenshots without a Screen
 # Recording grant. Development only; see src/dev_capture.rs.
