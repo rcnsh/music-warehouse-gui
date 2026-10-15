@@ -12,3 +12,17 @@ The responses contain no credentials; only listening data.
 | `top.json` | `GET /api/top?range=short_term&limit=2` |
 | `error-401.json`, `error-400-bad-request.json` | Captured (bad token; `tz=Mars/Base`) |
 | `now-playing-idle.json`, `error-503-needs-reauth.json`, `error-429-rate-limited.json`, `error-502-upstream.json` | Written from the Worker source (`src/live.ts`, `src/index.ts`), since these states could not be triggered on demand. The `retry_after_seconds` value is illustrative. |
+
+Added on 2026-10-15 for the page foundation:
+
+| File | Source |
+|---|---|
+| `artist.json` | `GET /api/artist?id=…&tz=Europe/London`, months trimmed to the last six and top tracks to three |
+| `artist-placeholder.json` | `GET /api/artist?id=name:…` for a placeholder with no stored row: an empty history |
+| `track.json`, `search.json` | `GET /api/track?id=…&tz=Europe/London`, `GET /api/search?q=kendrick&limit=3` |
+| `top-tracks.json` | `GET /api/top-tracks?from=2026-09-01&to=2026-09-30&tz=Europe/London`, trimmed to three |
+| `on-this-day.json` | `GET /api/on-this-day?date=2026-10-15&tz=Europe/London`, trimmed to two years of two songs |
+| `recently-played.json` | `GET /api/recently-played?limit=2` (Spotify's payload, `available_markets` removed) |
+| `plays-search-after.json` | `GET /api/plays?limit=3&q=kendrick&after=…`, `_meta` removed |
+| `stats-*.json`, `wrapped.json`, `wrapped-ranges.json` | Written from the Worker's `main` source (`src/stats/*.ts`, `src/wrapped.ts`): the deployed Worker could not answer these at capture. Figures are illustrative. |
+| `stats-eras.json`, `stats-eras-single.json`, `concerts.json` | Written in `main`'s shape (era names, free-form region keys with `regions` labels), which is newer than the deployed Worker. Era and region names, venues and URLs are made up. |

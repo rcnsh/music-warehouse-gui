@@ -291,8 +291,10 @@ impl HistoryStore {
         let task = cx.spawn(async move |this, cx| {
             let q = query.clone();
             let result =
-                runtime::run(async move { client.plays(page_size, before, q.as_deref()).await })
-                    .await;
+                runtime::run(
+                    async move { client.plays(page_size, before, None, q.as_deref()).await },
+                )
+                .await;
             this.update(cx, |this, cx| {
                 // The task belongs to its feed, so a feed that was replaced
                 // never sees this; one that is still here is the right one.

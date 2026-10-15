@@ -1,0 +1,45 @@
+{
+  "date": "2026-10-15",
+  "years": [
+    {
+      "year": 2025,
+      "plays": 29,
+      "top_tracks": [
+        {
+          "id": "3CRDbSIZ4r5MsZ0YwxuEkn",
+          "name": "Stressed Out",
+          "artist": "Twenty One Pilots",
+          "image": "https://i.scdn.co/image/ab67616d0000b2732df0d98a423025032d0db1f7",
+          "plays": 3
+        },
+        {
+          "id": "7aL0AOx7qXe8tKWJ81cBFx",
+          "name": "Bilewater",
+          "artist": "Christopher Larkin",
+          "image": "https://i.scdn.co/image/ab67616d0000b273e9bb10e381fbd4f78ce2a511",
+          "plays": 2
+        }
+      ]
+    },
+    {
+      "year": 2024,
+      "plays": 40,
+      "top_tracks": [
+        {
+          "id": "1BANPzYIhCQkJ1ZFq2Fb0O",
+          "name": "Next Semester",
+          "artist": "Twenty One Pilots",
+          "image": "https://i.scdn.co/image/ab67616d0000b273cc94dd4730132ccfbd617bf9",
+          "plays": 6
+        },
+        {
+          "id": "4hfqe20vqkuRv1RDsA1LbQ",
+          "name": "The Craving (Jenna's version)",
+          "artist": "Twenty One Pilots",
+          "image": "https://i.scdn.co/image/ab67616d0000b273cc94dd4730132ccfbd617bf9",
+          "plays": 4
+        }
+      ]
+    }
+  ]
+}

@@ -25,6 +25,11 @@ displays data; the Worker does the polling, storage and aggregation.
 - **Overview** (⌘2): plays per day and top artists for 7 days, 30 days, a year
   or a custom range, bucketed by the Worker in the system timezone. Alongside
   them are Spotify's own live top lists, with artist photos and album art.
+- **Pages** in the sidebar, grouped as Listening (History, Overview, On
+  Repeat ⌘3, On This Day ⌘4), Stats (Top Albums ⌘5, Top Over Time ⌘6,
+  Rhythm ⌘7, Eras ⌘8, Wrapped ⌘9) and Live (Concerts ⌘0), plus Artist and
+  Track pages opened from other pages. ⌘[ goes back. The newer pages are
+  placeholders that load their data while each gets its own PR.
 - **Now playing** strip, polled every 20–30 seconds. It backs off on errors and
   pauses while the window is hidden.
 - ⌘K opens a command palette with every command, searchable by name.
@@ -112,6 +117,12 @@ The app talks to these Worker routes, all with
 | `GET /api/top-artists` | Overview top artists |
 | `GET /api/top` | Spotify's live top lists |
 | `GET /api/now-playing` | Now playing strip |
+| `GET /api/artist`, `GET /api/track` | Artist and Track pages |
+| `GET /api/on-this-day` | On This Day |
+| `GET /api/stats/{on-repeat,rhythm,top-over-time,eras,albums}` | The Stats pages |
+| `GET /api/wrapped/ranges`, `GET /api/wrapped` | Wrapped |
+| `GET /api/concerts` | Concerts, in whatever regions the Worker is configured for |
+| `GET /api/search`, `GET /api/top-tracks`, `GET /api/recently-played` | In the client, for pages to use |
 
 Signing in uses the Worker's native-app flow (see its README, "Signing in
 with Spotify"): the app listens on `http://127.0.0.1:<random port>/callback`,

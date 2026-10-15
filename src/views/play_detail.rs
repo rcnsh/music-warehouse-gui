@@ -12,6 +12,7 @@ use gpui_component::{
 };
 use gpui_kit_assets::IconName;
 
+use crate::actions::OpenTrack;
 use crate::dates;
 use crate::models::{Play, Rendition, album_rendition};
 use crate::views::widgets;
@@ -171,6 +172,15 @@ pub fn render(play: &Play, actions: DetailActions, cx: &App) -> AnyElement {
                         .on_click(actions.on_copy),
                 ),
         )
+        .child({
+            let open = OpenTrack::new(play.track_id.clone());
+            Button::new("detail-track")
+                .xsmall()
+                .ghost()
+                .icon(IconName::Music)
+                .label("Every play of this song")
+                .on_click(move |_, window, cx| window.dispatch_action(Box::new(open.clone()), cx))
+        })
         .when_some(context_link, |this, link| {
             this.child(
                 Button::new("detail-context")

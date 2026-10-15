@@ -1,0 +1,30 @@
+{
+  "q": "kendrick",
+  "artists": [
+    {
+      "id": "2YZyLoL8N0Wb9xBt1NhZWg",
+      "name": "Kendrick Lamar",
+      "plays": 1199
+    }
+  ],
+  "tracks": [
+    {
+      "id": "3QFInJAm9eyaho5vBzxInN",
+      "name": "family ties (with Kendrick Lamar)",
+      "artist": "Baby Keem",
+      "plays": 2
+    },
+    {
+      "id": "6l8mgVN9Xf1hiDIFGA6CTE",
+      "name": "AMERICA HAS A PROBLEM (feat. Kendrick Lamar)",
+      "artist": "Beyoncé",
+      "plays": 1
+    },
+    {
+      "id": "77UjLW8j5UAGAGVGhR5oUK",
+      "name": "Pray For Me (with Kendrick Lamar)",
+      "artist": "The Weeknd",
+      "plays": 1
+    }
+  ]
+}

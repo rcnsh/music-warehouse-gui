@@ -6,6 +6,8 @@
 //!
 //!   capture <name>         save the window as `<dir>/<name>.png`
 //!   action <namespace::Name>   dispatch a registered action, e.g. `mwgui::ShowOverview`
+//!   artist <id>            dispatch `OpenArtist` (an id or a `name:` placeholder)
+//!   track <id>             dispatch `OpenTrack`
 //!
 //! The file is deleted once handled and `<dir>/done` is touched, so a script
 //! can wait for each step.
@@ -13,7 +15,9 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use gpui::{App, AsyncApp};
+use gpui::{Action, AnyWindowHandle, App, AsyncApp};
+
+use crate::actions::{OpenArtist, OpenTrack};
 
 pub fn install(cx: &mut App) {
     let Some(dir) = std::env::var_os("MWGUI_CAPTURE_DIR").map(PathBuf::from) else {
@@ -56,11 +60,18 @@ fn handle(line: &str, dir: &std::path::Path, cx: &mut App) -> Result<(), String>
         }
         "action" => {
             let action = cx.build_action(arg, None).map_err(|e| e.to_string())?;
-            window
-                .update(cx, |_, window, cx| window.dispatch_action(action, cx))
-                .map_err(|e| e.to_string())
+            dispatch(window, action, cx)
         }
+        // These carry an id, so they cannot be built by name.
+        "artist" => dispatch(window, Box::new(OpenArtist::new(arg.to_owned())), cx),
+        "track" => dispatch(window, Box::new(OpenTrack::new(arg.to_owned())), cx),
         "" => Ok(()),
         other => Err(format!("unknown command {other}")),
     }
+}
+
+fn dispatch(window: AnyWindowHandle, action: Box<dyn Action>, cx: &mut App) -> Result<(), String> {
+    window
+        .update(cx, |_, window, cx| window.dispatch_action(action, cx))
+        .map_err(|e| e.to_string())
 }

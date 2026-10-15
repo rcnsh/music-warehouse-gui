@@ -10,14 +10,17 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 
+use chrono::NaiveDate;
 use reqwest::StatusCode;
 use serde::de::DeserializeOwned;
 use url::Url;
 
 use crate::dates::DateRange;
 use crate::models::{
-    DailyResponse, ErrorBody, NowPlayingResponse, Play, PlaysResponse, TopArtistsResponse,
-    TopResponse,
+    ARTIST_NAME_PREFIX, ArtistHistory, ConcertsResponse, DailyResponse, Eras, ErrorBody,
+    NowPlayingResponse, OnRepeat, OnThisDay, Play, PlaysResponse, RecentlyPlayedResponse, Rhythm,
+    SearchResponse, TopAlbums, TopArtistsResponse, TopOverTime, TopResponse, TopTracksResponse,
+    TrackHistory, Wrapped, WrappedRanges,
 };
 
 /// Bearer token wrapper whose `Debug` never prints the value, so a stray
@@ -217,15 +220,17 @@ impl ApiClient {
         decode(&body)
     }
 
-    /// Newest-first page of plays strictly older than `before_ms`, limited
-    /// to those whose track, album or artist name contains `search`.
+    /// Newest-first page of plays strictly older than `before_ms` and newer
+    /// than `after_ms`, limited to those whose track, album or artist name
+    /// contains `search`. With both bounds, a search stays inside a date range.
     pub async fn plays(
         &self,
         limit: u32,
         before_ms: Option<i64>,
+        after_ms: Option<i64>,
         search: Option<&str>,
     ) -> Result<Vec<Play>, ApiError> {
-        let query = plays_query(limit, before_ms, search);
+        let query = plays_query(limit, before_ms, after_ms, search);
         let response: PlaysResponse = self.get(self.endpoint("plays", &query)).await?;
         check_search_applied(search, response.q.as_deref())?;
         Ok(response.plays)
@@ -290,6 +295,169 @@ impl ApiClient {
         ];
         self.get(self.endpoint("top", &query)).await
     }
+
+    /// Spotify's own last plays, including any the Worker has not stored yet.
+    #[allow(dead_code)] // Full API surface; a page may not call it yet.
+    pub async fn recently_played(&self, limit: u32) -> Result<RecentlyPlayedResponse, ApiError> {
+        let query = [("limit", limit.clamp(1, 50).to_string())];
+        self.get(self.endpoint("recently-played", &query)).await
+    }
+
+    /// One artist's whole history. `id` is a Spotify id or a `name:`
+    /// placeholder (see [`crate::models::artist_key`]), passed through as is.
+    pub async fn artist(&self, id: &str, tz: &str) -> Result<ArtistHistory, ApiError> {
+        self.get(self.endpoint("artist", &artist_query(id, tz)))
+            .await
+    }
+
+    /// One song's whole history, every edition folded together.
+    pub async fn track(&self, id: &str, tz: &str) -> Result<TrackHistory, ApiError> {
+        let query = [("id", id.to_owned()), ("tz", tz.to_owned())];
+        self.get(self.endpoint("track", &query)).await
+    }
+
+    /// Stored artists and songs whose name contains `q`; `artist` narrows
+    /// the songs to those whose primary artist contains it.
+    #[allow(dead_code)] // Full API surface; a page may not call it yet.
+    pub async fn search(
+        &self,
+        q: &str,
+        artist: Option<&str>,
+        limit: u32,
+    ) -> Result<SearchResponse, ApiError> {
+        self.get(self.endpoint("search", &search_query(q, artist, limit)))
+            .await
+    }
+
+    /// Plays per song over a local-calendar range, most played first.
+    #[allow(dead_code)] // Full API surface; a page may not call it yet.
+    pub async fn top_tracks(
+        &self,
+        range: &DateRange,
+        tz: &str,
+        limit: u32,
+    ) -> Result<TopTracksResponse, ApiError> {
+        let mut query = range_query(range, tz);
+        query.push(("limit", limit.to_string()));
+        self.get(self.endpoint("top-tracks", &query)).await
+    }
+
+    /// The most-played songs on `date` (default today) in each earlier year.
+    pub async fn on_this_day(
+        &self,
+        date: Option<NaiveDate>,
+        tz: &str,
+    ) -> Result<OnThisDay, ApiError> {
+        let mut query = vec![("tz", tz.to_owned())];
+        if let Some(date) = date {
+            query.push(("date", date.format("%Y-%m-%d").to_string()));
+        }
+        self.get(self.endpoint("on-this-day", &query)).await
+    }
+
+    pub async fn on_repeat(&self) -> Result<OnRepeat, ApiError> {
+        self.get(self.endpoint(Stat::OnRepeat.route(), &[])).await
+    }
+
+    pub async fn rhythm(&self) -> Result<Rhythm, ApiError> {
+        self.get(self.endpoint(Stat::Rhythm.route(), &[])).await
+    }
+
+    pub async fn top_over_time(&self) -> Result<TopOverTime, ApiError> {
+        self.get(self.endpoint(Stat::TopOverTime.route(), &[]))
+            .await
+    }
+
+    pub async fn eras(&self) -> Result<Eras, ApiError> {
+        self.get(self.endpoint(Stat::Eras.route(), &[])).await
+    }
+
+    pub async fn top_albums(&self) -> Result<TopAlbums, ApiError> {
+        self.get(self.endpoint(Stat::Albums.route(), &[])).await
+    }
+
+    /// The ranges `wrapped` will compute for a read token.
+    pub async fn wrapped_ranges(&self) -> Result<WrappedRanges, ApiError> {
+        self.get(self.endpoint("wrapped/ranges", &[])).await
+    }
+
+    /// The summary for a closed range of local days, `YYYY-MM-DD` inclusive.
+    /// A read token gets only ranges from `wrapped_ranges` (or ones already
+    /// computed); anything else is a 403, [`ApiError::Server`].
+    pub async fn wrapped(&self, from: &str, to: &str) -> Result<Wrapped, ApiError> {
+        let query = [("from", from.to_owned()), ("to", to.to_owned())];
+        self.get(self.endpoint("wrapped", &query)).await
+    }
+
+    /// Upcoming concerts, optionally one region's (a key from the
+    /// response's `regions`) or only those first seen on or after `since`.
+    pub async fn concerts(
+        &self,
+        region: Option<&str>,
+        since: Option<NaiveDate>,
+        tz: &str,
+    ) -> Result<ConcertsResponse, ApiError> {
+        self.get(self.endpoint("concerts", &concerts_query(region, since, tz)))
+            .await
+    }
+}
+
+/// The `/api/stats/*` aggregates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Stat {
+    OnRepeat,
+    Rhythm,
+    TopOverTime,
+    Eras,
+    Albums,
+}
+
+impl Stat {
+    fn route(self) -> &'static str {
+        match self {
+            Self::OnRepeat => "stats/on-repeat",
+            Self::Rhythm => "stats/rhythm",
+            Self::TopOverTime => "stats/top-over-time",
+            Self::Eras => "stats/eras",
+            Self::Albums => "stats/albums",
+        }
+    }
+}
+
+/// A `name:` placeholder also sends its name, so the Worker can fold it
+/// into the real artist when the placeholder row itself is gone.
+fn artist_query(id: &str, tz: &str) -> Vec<(&'static str, String)> {
+    let mut query = vec![("id", id.to_owned())];
+    if let Some(name) = id.strip_prefix(ARTIST_NAME_PREFIX) {
+        query.push(("name", name.to_owned()));
+    }
+    query.push(("tz", tz.to_owned()));
+    query
+}
+
+fn search_query(q: &str, artist: Option<&str>, limit: u32) -> Vec<(&'static str, String)> {
+    let mut query = vec![("q", q.to_owned())];
+    if let Some(artist) = artist {
+        query.push(("artist", artist.to_owned()));
+    }
+    query.push(("limit", limit.clamp(1, 50).to_string()));
+    query
+}
+
+fn concerts_query(
+    region: Option<&str>,
+    since: Option<NaiveDate>,
+    tz: &str,
+) -> Vec<(&'static str, String)> {
+    let mut query = Vec::new();
+    if let Some(region) = region {
+        query.push(("region", region.to_owned()));
+    }
+    if let Some(since) = since {
+        query.push(("since", since.format("%Y-%m-%d").to_string()));
+        query.push(("tz", tz.to_owned()));
+    }
+    query
 }
 
 /// A Worker older than search ignores `q` and returns the unfiltered list,
@@ -307,11 +475,15 @@ fn check_search_applied(sent: Option<&str>, echoed: Option<&str>) -> Result<(), 
 fn plays_query(
     limit: u32,
     before_ms: Option<i64>,
+    after_ms: Option<i64>,
     search: Option<&str>,
 ) -> Vec<(&'static str, String)> {
     let mut query = vec![("limit", limit.to_string())];
     if let Some(before) = before_ms {
         query.push(("before", before.to_string()));
+    }
+    if let Some(after) = after_ms {
+        query.push(("after", after.to_string()));
     }
     if let Some(q) = search {
         query.push(("q", q.to_owned()));
@@ -502,16 +674,211 @@ mod tests {
 
     #[test]
     fn plays_search_is_encoded_into_q() {
-        let url = client().endpoint("plays", &plays_query(200, Some(17), Some("Sad & 100%")));
+        let url = client().endpoint(
+            "plays",
+            &plays_query(200, Some(17), None, Some("Sad & 100%")),
+        );
         assert_eq!(
             url.as_str(),
             "https://music.example.com/api/plays?limit=200&before=17&q=Sad+%26+100%25"
         );
-        let plain = client().endpoint("plays", &plays_query(50, None, None));
+        let plain = client().endpoint("plays", &plays_query(50, None, None, None));
         assert_eq!(
             plain.as_str(),
             "https://music.example.com/api/plays?limit=50"
         );
+    }
+
+    #[test]
+    fn plays_search_can_stay_inside_a_date_range() {
+        let url = client().endpoint("plays", &plays_query(100, Some(20), Some(10), Some("dna")));
+        assert_eq!(
+            url.as_str(),
+            "https://music.example.com/api/plays?limit=100&before=20&after=10&q=dna"
+        );
+        let response: PlaysResponse = decode(&fixture("plays-search-after.json")).unwrap();
+        assert_eq!(response.q.as_deref(), Some("kendrick"));
+        assert!(!response.plays.is_empty());
+    }
+
+    #[test]
+    fn history_urls() {
+        let c = client();
+        assert_eq!(
+            c.endpoint(
+                "artist",
+                &artist_query("2YZyLoL8N0Wb9xBt1NhZWg", "Europe/London")
+            )
+            .as_str(),
+            "https://music.example.com/api/artist?id=2YZyLoL8N0Wb9xBt1NhZWg&tz=Europe%2FLondon"
+        );
+        // A placeholder also sends its name, so the Worker can fold it.
+        assert_eq!(
+            c.endpoint("artist", &artist_query("name:Sigur Rós", "UTC"))
+                .as_str(),
+            "https://music.example.com/api/artist?id=name%3ASigur+R%C3%B3s&name=Sigur+R%C3%B3s&tz=UTC"
+        );
+        assert_eq!(
+            c.endpoint("search", &search_query("a&b", Some("x"), 99))
+                .as_str(),
+            "https://music.example.com/api/search?q=a%26b&artist=x&limit=50"
+        );
+        assert_eq!(
+            c.endpoint("search", &search_query("dna", None, 10))
+                .as_str(),
+            "https://music.example.com/api/search?q=dna&limit=10"
+        );
+    }
+
+    #[test]
+    fn stat_and_concert_urls() {
+        let c = client();
+        assert_eq!(
+            c.endpoint(Stat::TopOverTime.route(), &[]).as_str(),
+            "https://music.example.com/api/stats/top-over-time"
+        );
+        assert_eq!(
+            c.endpoint(Stat::OnRepeat.route(), &[]).as_str(),
+            "https://music.example.com/api/stats/on-repeat"
+        );
+        assert_eq!(
+            c.endpoint("concerts", &concerts_query(None, None, "UTC"))
+                .as_str(),
+            "https://music.example.com/api/concerts"
+        );
+        let since = NaiveDate::from_ymd_opt(2026, 10, 1);
+        assert_eq!(
+            c.endpoint(
+                "concerts",
+                &concerts_query(Some("pt"), since, "Europe/Lisbon")
+            )
+            .as_str(),
+            "https://music.example.com/api/concerts?region=pt&since=2026-10-01&tz=Europe%2FLisbon"
+        );
+    }
+
+    #[test]
+    fn history_fixtures_decode() {
+        let artist: ArtistHistory = decode(&fixture("artist.json")).unwrap();
+        assert_eq!(artist.artist.name, "Kendrick Lamar");
+        assert!(artist.plays > 0 && artist.minutes > 0);
+        assert_eq!(artist.months.len(), 6);
+        assert_eq!(artist.top_tracks.len(), 3);
+        assert!(artist.top_tracks[0].artist.is_none(), "implied by the page");
+        assert!(artist.top_tracks[0].id.is_some());
+
+        let empty: ArtistHistory = decode(&fixture("artist-placeholder.json")).unwrap();
+        assert_eq!(empty.plays, 0);
+        assert!(empty.first_played.is_none());
+
+        let track: TrackHistory = decode(&fixture("track.json")).unwrap();
+        assert_eq!(track.track.name.as_deref(), Some("We Cry Together"));
+        assert_eq!(track.months[0].month, "2026-10");
+
+        let top: TopTracksResponse = decode(&fixture("top-tracks.json")).unwrap();
+        assert_eq!(top.tracks.len(), 3);
+        assert!(top.tracks[0].plays >= top.tracks[1].plays);
+
+        let day: OnThisDay = decode(&fixture("on-this-day.json")).unwrap();
+        assert_eq!(day.date, "2026-10-15");
+        assert!(day.years[0].year > day.years[1].year, "newest year first");
+        assert!(day.years[0].top_tracks[0].artist.is_some());
+
+        let search: SearchResponse = decode(&fixture("search.json")).unwrap();
+        assert_eq!(search.artists[0].name, "Kendrick Lamar");
+        assert_eq!(search.tracks.len(), 3);
+
+        let recent: RecentlyPlayedResponse = decode(&fixture("recently-played.json")).unwrap();
+        assert_eq!(recent.items.len(), 2);
+        let first = &recent.items[0];
+        assert!(first.played_at.is_some());
+        let track = first.track.as_ref().unwrap();
+        assert!(track.id.is_some());
+        assert!(track.artists[0].id.is_some());
+        assert_eq!(
+            first.context.as_ref().unwrap().kind.as_deref(),
+            Some("album")
+        );
+    }
+
+    #[test]
+    fn stats_fixtures_decode() {
+        let repeat: OnRepeat = decode(&fixture("stats-on-repeat.json")).unwrap();
+        assert_eq!(repeat.window_days, 14);
+        assert_eq!(repeat.tracks[0].daily.len(), 14);
+        assert_eq!(repeat.albums[0].tracks_on_repeat, 5);
+
+        let rhythm: Rhythm = decode(&fixture("stats-rhythm.json")).unwrap();
+        assert_eq!(rhythm.streaks.len(), 3);
+        assert!(rhythm.streaks[0].top[1].days.is_none(), "running streak");
+        assert_eq!(rhythm.eras[0].grid.as_ref().unwrap().len(), 7);
+        assert_eq!(rhythm.eras[0].hour_share.as_ref().unwrap().len(), 24);
+        assert!(rhythm.eras[1].grid.is_none());
+        assert!(rhythm.years[1].partial);
+
+        let top: TopOverTime = decode(&fixture("stats-top-over-time.json")).unwrap();
+        assert_eq!(top.quarters.len(), 3);
+        assert_eq!(top.leaders[0].share.len(), top.quarters.len());
+        assert!(top.quarters[2].partial);
+
+        let albums: TopAlbums = decode(&fixture("stats-albums.json")).unwrap();
+        assert_eq!(albums.min_songs, 4);
+        assert_eq!(albums.years[1].albums[1].image, None);
+    }
+
+    #[test]
+    fn eras_fixture_decodes_in_main_shape() {
+        let eras: Eras = decode(&fixture("stats-eras.json")).unwrap();
+        assert_eq!(eras.latest_era.as_ref().unwrap().label, "City B");
+        assert_eq!(eras.previous_era.as_ref().unwrap().key, "city-a");
+        assert!(eras.ready);
+        assert_eq!(eras.summary.as_ref().unwrap().typical_change.windows, 27);
+        assert_eq!(eras.top.latest[0].artist, "Kendrick Lamar");
+        assert_eq!(eras.risers.len(), 1);
+
+        let single: Eras = decode(&fixture("stats-eras-single.json")).unwrap();
+        assert!(single.latest_era.is_none() && single.summary.is_none());
+
+        // The deployed Worker may still send v1 keys; those must not fail.
+        let v1: Eras = decode(
+            r#"{"as_of":"x","singapore":{"from":"a","to":"b"},"top":{"newcastle":[],"singapore":[]}}"#,
+        )
+        .unwrap();
+        assert!(v1.latest.is_none() && v1.top.latest.is_empty());
+    }
+
+    #[test]
+    fn wrapped_fixtures_decode() {
+        let ranges: WrappedRanges = decode(&fixture("wrapped-ranges.json")).unwrap();
+        assert_eq!(ranges.ranges[0].kind, "year_to_date");
+        assert!(!ranges.ranges[0].computed);
+
+        let wrapped: Wrapped = decode(&fixture("wrapped.json")).unwrap();
+        assert_eq!(wrapped.range.days, 365);
+        assert_eq!(wrapped.hours.len(), 24);
+        assert_eq!(wrapped.weekdays.len(), 7);
+        assert_eq!(wrapped.listening_age.as_ref().unwrap().window, (2015, 2019));
+        assert_eq!(wrapped.top_artists[1].top_song, None);
+        assert_eq!(wrapped.streak.as_ref().unwrap().days, 64);
+    }
+
+    #[test]
+    fn concerts_fixture_decodes_with_free_form_regions() {
+        let response: ConcertsResponse = decode(&fixture("concerts.json")).unwrap();
+        assert_eq!(response.concerts.len(), 3);
+        assert_eq!(response.region_label("pt"), "Portugal");
+        assert_eq!(response.region_label("unknown"), "unknown");
+        assert!(response.checked.contains_key("berlin"));
+        let undated = &response.concerts[2];
+        assert_eq!(undated.date, None);
+        assert_eq!(response.concerts[1].url, None);
+
+        // Workers older than configurable regions send no `regions` list.
+        let old: ConcertsResponse =
+            decode(r#"{"checked":{},"concerts":[{"region":"x","artists":"a","name":"n","first_seen":"t"}]}"#)
+                .unwrap();
+        assert!(old.regions.is_empty());
+        assert_eq!(old.region_label("x"), "x");
     }
 
     #[test]

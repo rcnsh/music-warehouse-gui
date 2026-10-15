@@ -1,0 +1,183 @@
+{
+  "as_of": "2026-10-12T00:00:00.000Z",
+  "attribution": "primary-artist",
+  "quarters": [
+    {
+      "period": "2026-Q2",
+      "partial": false,
+      "plays": 3210,
+      "artists": [
+        {
+          "name": "Kendrick Lamar",
+          "plays": 412,
+          "share": 0.128
+        },
+        {
+          "name": "Kanye West",
+          "plays": 300,
+          "share": 0.093
+        }
+      ],
+      "tracks": [
+        {
+          "name": "DNA.",
+          "artist": "Kendrick Lamar",
+          "plays": 39,
+          "image": "https://i.scdn.co/image/ab67616d0000b2738b52c6b9bc4e43d873869699"
+        },
+        {
+          "name": "Stressed Out",
+          "artist": "Twenty One Pilots",
+          "plays": 21,
+          "image": null
+        }
+      ]
+    },
+    {
+      "period": "2026-Q3",
+      "partial": false,
+      "plays": 3402,
+      "artists": [
+        {
+          "name": "Kendrick Lamar",
+          "plays": 412,
+          "share": 0.128
+        },
+        {
+          "name": "Kanye West",
+          "plays": 300,
+          "share": 0.093
+        }
+      ],
+      "tracks": [
+        {
+          "name": "DNA.",
+          "artist": "Kendrick Lamar",
+          "plays": 39,
+          "image": "https://i.scdn.co/image/ab67616d0000b2738b52c6b9bc4e43d873869699"
+        },
+        {
+          "name": "Stressed Out",
+          "artist": "Twenty One Pilots",
+          "plays": 21,
+          "image": null
+        }
+      ]
+    },
+    {
+      "period": "2026-Q4",
+      "partial": true,
+      "plays": 512,
+      "artists": [
+        {
+          "name": "Kendrick Lamar",
+          "plays": 412,
+          "share": 0.128
+        },
+        {
+          "name": "Kanye West",
+          "plays": 300,
+          "share": 0.093
+        }
+      ],
+      "tracks": [
+        {
+          "name": "DNA.",
+          "artist": "Kendrick Lamar",
+          "plays": 39,
+          "image": "https://i.scdn.co/image/ab67616d0000b2738b52c6b9bc4e43d873869699"
+        },
+        {
+          "name": "Stressed Out",
+          "artist": "Twenty One Pilots",
+          "plays": 21,
+          "image": null
+        }
+      ]
+    }
+  ],
+  "years": [
+    {
+      "period": "2025",
+      "partial": false,
+      "plays": 12034,
+      "artists": [
+        {
+          "name": "Kendrick Lamar",
+          "plays": 412,
+          "share": 0.128
+        },
+        {
+          "name": "Kanye West",
+          "plays": 300,
+          "share": 0.093
+        }
+      ],
+      "tracks": [
+        {
+          "name": "DNA.",
+          "artist": "Kendrick Lamar",
+          "plays": 39,
+          "image": "https://i.scdn.co/image/ab67616d0000b2738b52c6b9bc4e43d873869699"
+        },
+        {
+          "name": "Stressed Out",
+          "artist": "Twenty One Pilots",
+          "plays": 21,
+          "image": null
+        }
+      ]
+    },
+    {
+      "period": "2026",
+      "partial": true,
+      "plays": 7124,
+      "artists": [
+        {
+          "name": "Kendrick Lamar",
+          "plays": 412,
+          "share": 0.128
+        },
+        {
+          "name": "Kanye West",
+          "plays": 300,
+          "share": 0.093
+        }
+      ],
+      "tracks": [
+        {
+          "name": "DNA.",
+          "artist": "Kendrick Lamar",
+          "plays": 39,
+          "image": "https://i.scdn.co/image/ab67616d0000b2738b52c6b9bc4e43d873869699"
+        },
+        {
+          "name": "Stressed Out",
+          "artist": "Twenty One Pilots",
+          "plays": 21,
+          "image": null
+        }
+      ]
+    }
+  ],
+  "leaders": [
+    {
+      "name": "Twenty One Pilots",
+      "plays": 2012,
+      "share": [
+        0.11,
+        0.06,
+        0.03
+      ]
+    },
+    {
+      "name": "Kendrick Lamar",
+      "plays": 1199,
+      "share": [
+        0.08,
+        0.128,
+        0.14
+      ]
+    }
+  ]
+}

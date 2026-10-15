@@ -19,11 +19,12 @@ use gpui_component::{
         scale::{Scale, ScaleBand},
     },
     scroll::ScrollableElement,
-    table::{Column, DataTable, TableDelegate, TableState},
+    table::{Column, DataTable, TableDelegate, TableEvent, TableState},
     v_flex,
 };
 use gpui_kit_assets::IconName;
 
+use crate::actions::OpenArtist;
 use crate::api::{ApiClient, ApiError, TopRange};
 use crate::dates::{self, RangePreset};
 use crate::models::{DayCount, ImageRef, join_names, pick_image};
@@ -224,6 +225,26 @@ impl OverviewView {
             }),
             cx.subscribe_in(&from_input, window, Self::on_custom_input),
             cx.subscribe_in(&to_input, window, Self::on_custom_input),
+            // A double-click opens the artist's page; the shell handles it.
+            cx.subscribe_in(
+                &artists_table,
+                window,
+                |this, _, event: &TableEvent, window, cx| {
+                    let TableEvent::DoubleClickedRow(ix) = event else {
+                        return;
+                    };
+                    let id = this
+                        .store
+                        .read(cx)
+                        .artists
+                        .data
+                        .as_ref()
+                        .and_then(|r| r.artists.get(*ix).map(|a| a.artist_id.clone()));
+                    if let Some(id) = id {
+                        window.dispatch_action(Box::new(OpenArtist::new(id)), cx);
+                    }
+                },
+            ),
         ];
         Self {
             store,
@@ -606,7 +627,7 @@ impl Render for OverviewView {
                             if artists_loading_more {
                                 "Top artists · refreshing…"
                             } else {
-                                "Top artists"
+                                "Top artists · double-click for an artist's page"
                             },
                             cx,
                         )
