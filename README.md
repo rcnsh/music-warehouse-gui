@@ -3,9 +3,8 @@
 <p><strong>A native macOS app for browsing your Spotify listening history.</strong></p>
 <p>
 <a href="LICENSE"><img alt="Licence: MIT" src="https://img.shields.io/badge/licence-MIT-blue?style=flat-square"></a>
-<a href="https://www.rust-lang.org"><img alt="Rust" src="https://img.shields.io/badge/Rust-2024-orange?style=flat-square&logo=rust"></a>
-<img alt="macOS 12+" src="https://img.shields.io/badge/macOS-12%2B-lightgrey?style=flat-square&logo=apple">
-<a href="https://github.com/rcnsh/music-warehouse-gui/actions/workflows/check.yml"><img alt="check" src="https://img.shields.io/github/actions/workflow/status/rcnsh/music-warehouse-gui/check.yml?branch=main&style=flat-square&label=check"></a>
+<a href="https://www.rust-lang.org"><img alt="Rust" src="https://img.shields.io/badge/Rust-000000?style=flat-square&logo=rust&logoColor=white"></a>
+<img alt="macOS 12+" src="https://img.shields.io/badge/macOS%2012%2B-000000?style=flat-square&logo=apple&logoColor=white">
 <a href="https://github.com/rcnsh/music-warehouse#clients"><img alt="Part of music-warehouse" src="https://img.shields.io/badge/part%20of-music--warehouse-1DB954?style=flat-square"></a>
 </p>
 <p><a href="#features">Features</a> · <a href="#quick-start">Quick start</a> · <a href="#install">Install</a> · <a href="#configuration">Configuration</a> · <a href="#keyboard-shortcuts">Shortcuts</a> · <a href="#development">Development</a></p>
