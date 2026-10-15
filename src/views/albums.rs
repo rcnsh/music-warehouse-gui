@@ -1,17 +1,24 @@
-//! The Top Albums page (`/api/stats/albums`).
-//!
-//! A placeholder until this page's own PR: it already loads its data so the
-//! whole path (shell → view → store → Worker) is exercised. The shell calls
-//! only `new`, `activate`, `refresh` and `Focusable::focus_handle`;
-//! keep those signatures and change everything else freely.
+//! The Top Albums page (`/api/stats/albums`): the most-played albums all
+//! time and per year. Every year arrives in the one response, so the year
+//! tabs switch without a request.
 
+use chrono::{DateTime, Local, NaiveDate, TimeZone};
 use gpui::AppContext as _;
 use gpui::{
-    App, Context, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement, ParentElement,
-    Render, Styled, Subscription, Window, div, px,
+    AnyElement, App, Context, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement,
+    ParentElement, Render, SharedString, Styled, Subscription, Window, div, prelude::FluentBuilder,
+    px,
 };
+use gpui_component::{
+    Icon,
+    tab::{Tab, TabBar},
+    v_flex,
+};
+use gpui_kit_assets::IconName;
 
+use crate::actions::OpenArtist;
 use crate::api::ApiClient;
+use crate::models::{TopAlbum, TopAlbums};
 use crate::state::albums::AlbumsStore;
 use crate::views::widgets;
 
@@ -19,6 +26,8 @@ pub struct AlbumsView {
     store: Entity<AlbumsStore>,
     focus: FocusHandle,
     activated: bool,
+    /// Which tab is showing: 0 is all time, then the years newest first.
+    tab: usize,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -30,6 +39,7 @@ impl AlbumsView {
             store,
             focus: cx.focus_handle(),
             activated: false,
+            tab: 0,
             _subscriptions: subscriptions,
         }
     }
@@ -55,10 +65,120 @@ impl Focusable for AlbumsView {
     }
 }
 
+/// One tab's worth of albums: what to call it and whether its year is
+/// still running.
+struct Selection<'a> {
+    label: SharedString,
+    partial: bool,
+    albums: &'a [TopAlbum],
+}
+
+/// Tab labels in display order: all time, then each year newest first.
+fn tab_labels(data: &TopAlbums) -> Vec<SharedString> {
+    std::iter::once(SharedString::from("All time"))
+        .chain(data.years.iter().rev().map(|y| y.year.clone().into()))
+        .collect()
+}
+
+/// The albums under tab `tab`, falling back to all time when a refresh
+/// returned fewer years than the tab assumed.
+fn selection(data: &TopAlbums, tab: usize) -> Selection<'_> {
+    match tab
+        .checked_sub(1)
+        .and_then(|i| data.years.iter().rev().nth(i))
+    {
+        Some(year) => Selection {
+            label: year.year.clone().into(),
+            partial: year.partial,
+            albums: &year.albums,
+        },
+        None => Selection {
+            label: "All time".into(),
+            partial: false,
+            albums: &data.albums,
+        },
+    }
+}
+
+/// `2017-07` to `2026-10` as `Jul 2017 – Oct 2026`, or one month alone.
+fn month_span(from: &str, to: &str) -> String {
+    if from == to || to.is_empty() {
+        widgets::month_label(from)
+    } else {
+        format!(
+            "{} – {}",
+            widgets::month_label(from),
+            widgets::month_label(to)
+        )
+    }
+}
+
+/// The local calendar date of a stats `as_of` instant, in `tz`.
+fn local_date_in<Tz: TimeZone>(as_of: &str, tz: &Tz) -> Option<NaiveDate> {
+    DateTime::parse_from_rfc3339(as_of)
+        .ok()
+        .map(|t| t.with_timezone(tz).date_naive())
+}
+
+/// `as_of` as a short local date, `12 Oct 2026`. The stats pages share this.
+pub fn as_of_label(as_of: &str) -> Option<String> {
+    local_date_in(as_of, &Local).map(|d| d.format("%-d %b %Y").to_string())
+}
+
+fn album_rows(albums: &[TopAlbum], cx: &App) -> AnyElement {
+    let top = albums.first().map(|a| a.plays).unwrap_or(0).max(1) as f32;
+    v_flex()
+        .gap_0p5()
+        .children(albums.iter().enumerate().map(|(i, album)| {
+            let subtitle = format!(
+                "{} · {} songs · {}",
+                album.artist,
+                album.songs,
+                month_span(&album.from, &album.to)
+            );
+            widgets::RankedRow::new(("album", i), album.name.clone())
+                .rank(i + 1)
+                .art(widgets::album_art(album.image.as_deref(), px(32.), cx))
+                .subtitle(subtitle)
+                .value(format!("{} plays", widgets::count(album.plays.into())))
+                .share(album.plays as f32 / top)
+                .on_click_action(OpenArtist::by_name(&album.artist))
+        }))
+        .into_any_element()
+}
+
 impl Render for AlbumsView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let retry = cx.listener(|this, _, _, cx| this.refresh(cx));
+        let on_tab = cx.listener(|this, ix: &usize, _, cx| {
+            this.tab = *ix;
+            cx.notify();
+        });
         let store = self.store.read(cx);
+        let data = store.albums.data.as_ref();
+        let subtitle = data.map(|d| {
+            let mut text = format!(
+                "Albums with at least {} different songs played",
+                d.min_songs
+            );
+            if let Some(date) = as_of_label(&d.as_of) {
+                text.push_str(&format!(" · plays before {date}"));
+            }
+            SharedString::from(text)
+        });
+        // A refresh can return fewer years than the tab assumed.
+        let tab = match data {
+            Some(d) if self.tab <= d.years.len() => self.tab,
+            _ => 0,
+        };
+        let tabs = data.filter(|d| !d.years.is_empty()).map(|d| {
+            TabBar::new("albums-years")
+                .segmented()
+                .selected_index(tab)
+                .children(tab_labels(d).into_iter().map(|l| Tab::new().label(l)))
+                .on_click(on_tab)
+                .into_any_element()
+        });
         let body = widgets::remote_view(
             "albums-retry",
             &store.albums,
@@ -66,19 +186,99 @@ impl Render for AlbumsView {
             retry,
             cx,
             |data| {
-                let summary = format!(
-                    "{} albums all time across {} years, as of {}",
-                    data.albums.len(),
-                    data.years.len(),
-                    data.as_of
-                );
-                widgets::coming_soon("Top Albums is on its way", Some(summary.into()), cx)
+                let selected = selection(data, tab);
+                if selected.albums.is_empty() {
+                    return widgets::state_panel(
+                        Some(Icon::new(IconName::Inbox)),
+                        "No albums yet",
+                        Some(
+                            format!(
+                                "No album in {} has {} different songs played.",
+                                selected.label, data.min_songs
+                            )
+                            .into(),
+                        ),
+                        None,
+                        cx,
+                    )
+                    .into_any_element();
+                }
+                let detail = if selected.partial {
+                    format!("{} so far", selected.label)
+                } else {
+                    selected.label.to_string()
+                };
+                v_flex()
+                    .gap_2()
+                    .child(widgets::section_heading(
+                        "Most played",
+                        Some(detail.into()),
+                        cx,
+                    ))
+                    .child(album_rows(selected.albums, cx))
                     .into_any_element()
             },
         );
+        let filled = data.is_some();
         widgets::page("albums")
             .track_focus(&self.focus)
-            .child(widgets::page_header("Top Albums", None, None, cx))
-            .child(div().h(px(320.)).child(body))
+            .child(widgets::page_header("Top Albums", subtitle, None, cx))
+            .when_some(tabs, |this, tabs| this.child(div().child(tabs)))
+            .child(div().when(!filled, |this| this.h(px(320.))).child(body))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::{FixedOffset, Utc};
+
+    fn fixture() -> TopAlbums {
+        serde_json::from_str(include_str!("../../tests/fixtures/stats-albums.json")).unwrap()
+    }
+
+    #[test]
+    fn tabs_run_all_time_then_newest_year_first() {
+        let data = fixture();
+        let labels = tab_labels(&data);
+        assert_eq!(labels[0].as_ref(), "All time");
+        assert_eq!(labels[1].as_ref(), "2026");
+        assert_eq!(labels[2].as_ref(), "2025");
+
+        let year = selection(&data, 1);
+        assert_eq!(year.label.as_ref(), "2026");
+        assert!(year.partial);
+        assert_eq!(selection(&data, 2).label.as_ref(), "2025");
+        assert_eq!(selection(&data, 0).albums.len(), data.albums.len());
+    }
+
+    #[test]
+    fn a_stale_tab_falls_back_to_all_time() {
+        let data = fixture();
+        let fallback = selection(&data, 99);
+        assert_eq!(fallback.label.as_ref(), "All time");
+        assert!(!fallback.partial);
+    }
+
+    #[test]
+    fn spans_read_as_months() {
+        assert_eq!(month_span("2017-07", "2026-10"), "Jul 2017 – Oct 2026");
+        assert_eq!(month_span("2026-10", "2026-10"), "Oct 2026");
+    }
+
+    #[test]
+    fn as_of_is_read_in_local_time() {
+        let singapore = FixedOffset::east_opt(8 * 3600).unwrap();
+        // Local midnight in Singapore is 16:00 UTC the day before.
+        let as_of = "2026-10-14T16:00:00.000Z";
+        assert_eq!(
+            local_date_in(as_of, &singapore),
+            NaiveDate::from_ymd_opt(2026, 10, 15)
+        );
+        assert_eq!(
+            local_date_in(as_of, &Utc),
+            NaiveDate::from_ymd_opt(2026, 10, 14)
+        );
+        assert_eq!(local_date_in("not a date", &Utc), None);
     }
 }
