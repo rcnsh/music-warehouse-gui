@@ -33,6 +33,7 @@ config.json + Keychain ──> AppRoot ──> SetupView      (no config or toke
 | `src/api.rs` | `ApiClient`, URL rules, `ApiError` classification, `Secret` (redacted `Debug`), admin-token probe |
 | `src/models.rs` | Response shapes, image size selection (`pick_image`, `album_rendition`) |
 | `src/config.rs` | Worker URL file and Keychain token |
+| `src/signin.rs` | Sign in with Spotify: PKCE, loopback listener, code exchange at `/auth/token` |
 | `src/ui_state.rs` | Window frame, last page, ranges, appearance in `ui-state.json` |
 | `src/dates.rs` | Range presets and custom ranges in the system timezone |
 | `src/runtime.rs` | Tokio runtime bridge for reqwest |
@@ -51,7 +52,8 @@ config.json + Keychain ──> AppRoot ──> SetupView      (no config or toke
 
 - **music-warehouse Worker**: `/api/plays`, `/api/daily`, `/api/top-artists`
   (stored rows) and `/api/now-playing`, `/api/top` (live Spotify proxies).
-  Bearer `READ_TOKEN` only.
+  Bearer read token only. `/auth/login` (in the browser) and `/auth/token`
+  for signing in.
 - **Spotify image CDN**: album art and artist photos, fetched by GPUI's
   `img()` through `gpui-pre-reqwest-client` and kept in GPUI's asset cache.
 - **macOS Keychain**: the token, via the `keyring` crate.
@@ -62,7 +64,8 @@ config.json + Keychain ──> AppRoot ──> SetupView      (no config or toke
   and rankings come from the Worker. The History filter only searches loaded
   rows, and paging pauses while it is active.
 - **Read-only by construction.** The client has no method for `/health`,
-  `/login` or `/admin/*`. Setup sends one request to a non-existent admin path:
+  `/login` or `/admin/*`. Sign-in only ever gets a read token from the
+  Worker, and `signin.rs` refuses a response with any other access. Setup sends one request to a non-existent admin path:
   a 404 means the token has admin access, and setup refuses it.
 - **Stored and live data fail separately.** Live routes have their own error
   variants (`NeedsReauth`, `RateLimited`, `Upstream`), so an expired Spotify
@@ -76,5 +79,10 @@ config.json + Keychain ──> AppRoot ──> SetupView      (no config or toke
 - **Own chart hit-testing.** `BarChart` has no click callback, so
   `views/overview.rs` rebuilds its band layout with `ScaleBand` to map clicks
   to days.
+- **Loopback sign-in.** RFC 8252: the listener binds `127.0.0.1` (never
+  `localhost`, which the Worker refuses) on an OS-assigned port, answers one
+  redirect and closes. PKCE binds the code to this process, since the
+  exchange carries no `Origin`. A signed-in token is checked and saved like
+  a pasted one, in the same Keychain item.
 - **Separate state files.** `ui-state.json` is kept apart from `config.json`
   so a bad file only loses window position, never the Worker setup.

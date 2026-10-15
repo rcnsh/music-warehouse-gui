@@ -4117,8 +4117,10 @@ checksum = "743fb55ba31b18fb1ecef6bdc9aa2743314978ac084044301a7eee33fb99a20d"
 name = "music-warehouse-gui"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "chrono",
  "dirs 7.0.0",
+ "getrandom 0.3.4",
  "gpui-base",
  "gpui-component",
  "gpui-kit-assets",
@@ -4131,6 +4133,7 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "sha2 0.11.0",
  "thiserror 2.0.21",
  "tokio",
  "url",

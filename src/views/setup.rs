@@ -18,6 +18,7 @@ use crate::api::{self, ApiClient, ApiError, Secret};
 use crate::config::{self, Config};
 use crate::dates;
 use crate::runtime;
+use crate::signin::{self, SignInError};
 use crate::views::widgets;
 
 pub enum SetupEvent {
@@ -28,6 +29,8 @@ pub enum SetupEvent {
 enum Status {
     Idle,
     Testing,
+    /// Waiting for the user to approve in the browser.
+    SigningIn,
     /// The URL and token that passed, so Save stores exactly what was tested.
     Passed {
         url: Url,
@@ -37,8 +40,9 @@ enum Status {
     Failed(SharedString),
 }
 
-/// First-run setup, and Settings later. The token field may be left blank
-/// when a token is already in the Keychain, so changing only the URL does not
+/// First-run setup, and Settings later. A token comes from signing in with
+/// Spotify or from pasting one. The token field may be left blank when a
+/// token is already in the Keychain, so changing only the URL does not
 /// require pasting the secret again.
 pub struct SetupView {
     url_input: Entity<InputState>,
@@ -79,7 +83,7 @@ impl SetupView {
         let token_placeholder = if existing_token.is_some() {
             "Saved in Keychain. Leave blank to keep it"
         } else {
-            "READ_TOKEN"
+            "READ_TOKEN, or a device token"
         };
         let token_input = cx.new(|cx| {
             InputState::new(window, cx)
@@ -116,15 +120,15 @@ impl SetupView {
         match event {
             // A passed test only vouches for the values that were tested.
             InputEvent::Change => {
-                if !matches!(self.status, Status::Idle | Status::Testing) {
+                if matches!(self.status, Status::Passed { .. } | Status::Failed(_)) {
                     self.status = Status::Idle;
                     cx.notify();
                 }
             }
             InputEvent::PressEnter { .. } => {
                 if matches!(self.status, Status::Passed { .. }) {
-                    self.save(window, cx);
-                } else {
+                    self.save(cx);
+                } else if !self.busy() {
                     self.test(window, cx);
                 }
             }
@@ -144,6 +148,22 @@ impl SetupView {
             (true, None) => return self.fail("Enter the READ_TOKEN.".into(), cx),
         };
 
+        self.verify(url, token, None, cx);
+    }
+
+    fn busy(&self) -> bool {
+        matches!(self.status, Status::Testing | Status::SigningIn)
+    }
+
+    /// Checks a token against the Worker. A token from signing in is saved as
+    /// soon as it passes: the user already approved it in the browser.
+    fn verify(
+        &mut self,
+        url: Url,
+        token: Secret,
+        signed_in: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
         self.status = Status::Testing;
         cx.notify();
         let client = ApiClient::new(url.clone(), token.clone());
@@ -160,7 +180,7 @@ impl SetupView {
             this.update(cx, |this, cx| {
                 this.status = match outcome {
                     Ok(None) => Status::Failed(
-                        "That is the ADMIN_TOKEN. This app only needs READ_TOKEN, which \
+                        "That is the ADMIN_TOKEN. This app only needs a read token, which \
                          cannot trigger polls or write rows. Paste READ_TOKEN instead."
                             .into(),
                     ),
@@ -169,16 +189,22 @@ impl SetupView {
                         token,
                         summary: match plays.first() {
                             Some(play) => format!(
-                                "Connected. Newest play: {} ({}).",
+                                "{} Newest play: {} ({}).",
+                                signed_in.as_deref().unwrap_or("Connected."),
                                 play.track_name.as_deref().unwrap_or("unknown track"),
                                 dates::format_played_at(play.played_at_ms, &chrono::Local)
                             )
                             .into(),
-                            None => "Connected. The warehouse has no plays yet.".into(),
+                            None => format!(
+                                "{} The warehouse has no plays yet.",
+                                signed_in.as_deref().unwrap_or("Connected.")
+                            )
+                            .into(),
                         },
                     },
                     Err(ApiError::Unauthorized) => Status::Failed(
-                        "The Worker rejected that token. Check it is the Worker's READ_TOKEN."
+                        "The Worker rejected that token. It may have expired or been revoked; \
+                         sign in again or paste a current token."
                             .into(),
                     ),
                     Err(error) => {
@@ -186,10 +212,53 @@ impl SetupView {
                         Status::Failed(format!("{}: {}", copy.title, copy.detail).into())
                     }
                 };
+                if signed_in.is_some() && matches!(this.status, Status::Passed { .. }) {
+                    this.save(cx);
+                }
                 cx.notify();
             })
             .ok();
         }));
+    }
+
+    /// Signs in with Spotify through the system browser. See `signin.rs`.
+    fn sign_in(&mut self, _: &mut Window, cx: &mut Context<Self>) {
+        let url = match api::parse_base_url(&self.url_input.read(cx).value()) {
+            Ok(url) => url,
+            Err(message) => {
+                return self.fail(format!("{message} Sign-in needs the Worker URL first."), cx);
+            }
+        };
+        self.status = Status::SigningIn;
+        cx.notify();
+        let base = url.clone();
+        // Cancellable, so dropping this task (Cancel, or closing Settings)
+        // also closes the loopback listener.
+        self._task = Some(cx.spawn(async move |this, cx| {
+            let outcome = async {
+                let pending = flatten(
+                    runtime::run_cancellable(async { Ok(signin::start(base).await) }).await,
+                )?;
+                let login_url = pending.login_url.to_string();
+                cx.update(|cx| cx.open_url(&login_url));
+                flatten(runtime::run_cancellable(async { Ok(pending.finish().await) }).await)
+            }
+            .await;
+            this.update(cx, |this, cx| match outcome {
+                Ok(signed_in) => {
+                    let summary = signed_in.describe();
+                    this.verify(url, signed_in.token, Some(summary), cx)
+                }
+                Err(error) => this.fail(error.to_string(), cx),
+            })
+            .ok();
+        }));
+    }
+
+    fn cancel_sign_in(&mut self, cx: &mut Context<Self>) {
+        self._task = None;
+        self.status = Status::Idle;
+        cx.notify();
     }
 
     fn fail(&mut self, message: String, cx: &mut Context<Self>) {
@@ -197,7 +266,7 @@ impl SetupView {
         cx.notify();
     }
 
-    fn save(&mut self, _: &mut Window, cx: &mut Context<Self>) {
+    fn save(&mut self, cx: &mut Context<Self>) {
         let Status::Passed { url, token, .. } = &self.status else {
             return;
         };
@@ -226,9 +295,15 @@ impl Render for SetupView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let passed = matches!(self.status, Status::Passed { .. });
         let testing = matches!(self.status, Status::Testing);
+        let signing_in = matches!(self.status, Status::SigningIn);
         let status_line = match &self.status {
             Status::Idle => None,
             Status::Testing => Some((IconName::LoaderCircle, "Testing…".into(), false)),
+            Status::SigningIn => Some((
+                IconName::LoaderCircle,
+                "Approve the sign-in in your browser, then come back here.".into(),
+                false,
+            )),
             Status::Passed { summary, .. } => Some((IconName::CircleCheck, summary.clone(), false)),
             Status::Failed(message) => Some((IconName::TriangleAlert, message.clone(), true)),
         };
@@ -264,9 +339,10 @@ impl Render for SetupView {
                             .text_sm()
                             .text_color(cx.theme().muted_foreground)
                             .child(
-                                "Enter your Worker's URL and its READ_TOKEN. The URL is saved \
-                                 under Application Support; the token is stored only in the \
-                                 macOS Keychain.",
+                                "Enter your Worker's URL, then sign in with the Spotify account \
+                                 that owns it, or paste a read token. The URL is saved under \
+                                 Application Support; the token is stored only in the macOS \
+                                 Keychain.",
                             ),
                     )
                     .when_some(self.notice.clone(), |this, notice| {
@@ -281,8 +357,33 @@ impl Render for SetupView {
                         )
                     })
                     .child(field("Worker URL", Input::new(&self.url_input), cx))
+                    .child(
+                        h_flex()
+                            .gap_3()
+                            .child(if signing_in {
+                                Button::new("sign-in")
+                                    .outline()
+                                    .label("Cancel sign-in")
+                                    .on_click(cx.listener(|this, _, _, cx| this.cancel_sign_in(cx)))
+                            } else {
+                                Button::new("sign-in")
+                                    .outline()
+                                    .icon(IconName::LogIn)
+                                    .label("Sign in with Spotify")
+                                    .disabled(testing)
+                                    .on_click(
+                                        cx.listener(|this, _, window, cx| this.sign_in(window, cx)),
+                                    )
+                            })
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child("or paste a token below"),
+                            ),
+                    )
                     .child(field(
-                        "Read token",
+                        "Read token or device token",
                         Input::new(&self.token_input).mask_toggle(),
                         cx,
                     ))
@@ -310,7 +411,7 @@ impl Render for SetupView {
                                 Button::new("test")
                                     .label("Test connection")
                                     .loading(testing)
-                                    .disabled(testing)
+                                    .disabled(testing || signing_in)
                                     .when(!passed, |b| b.primary())
                                     .on_click(
                                         cx.listener(|this, _, window, cx| this.test(window, cx)),
@@ -321,9 +422,7 @@ impl Render for SetupView {
                                     .label("Save")
                                     .disabled(!passed)
                                     .when(passed, |b| b.primary())
-                                    .on_click(
-                                        cx.listener(|this, _, window, cx| this.save(window, cx)),
-                                    ),
+                                    .on_click(cx.listener(|this, _, _, cx| this.save(cx))),
                             ),
                     ),
             )
@@ -341,4 +440,8 @@ fn field(label: &'static str, input: Input, cx: &App) -> impl IntoElement {
                 .child(label),
         )
         .child(input)
+}
+
+fn flatten<T>(outcome: Result<Result<T, SignInError>, ApiError>) -> Result<T, SignInError> {
+    outcome.map_err(|e| SignInError::Network(e.to_string()))?
 }

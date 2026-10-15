@@ -7,6 +7,7 @@ mod dates;
 mod dev_capture;
 mod models;
 mod runtime;
+mod signin;
 mod state;
 mod ui_state;
 mod views;

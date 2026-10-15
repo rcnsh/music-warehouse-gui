@@ -3,7 +3,8 @@
 A native macOS app for exploring Spotify listening history stored by a
 [music-warehouse](https://github.com/rcnsh/music-warehouse) Cloudflare Worker.
 
-It reads the Worker's `/api/*` routes with a read-only token and shows every
+It reads the Worker's `/api/*` routes with a read-only token, which you get
+by signing in with Spotify or by pasting one, and shows every
 stored play, daily counts, top artists and what is playing now. Built in Rust
 with [GPUI](https://www.gpui.rs) and
 [gpui-component](https://github.com/longbridge/gpui-component). The app only
@@ -33,8 +34,8 @@ Spotify grant has expired; only the live strip and top lists say so.
 
 ## Quickstart
 
-You need a deployed music-warehouse Worker with `READ_TOKEN` set (see
-[Worker](#worker)).
+You need a deployed music-warehouse Worker (see [Worker](#worker)) and either
+the Spotify account that owns it or a read token.
 
 1. Install a release (below) or build from source:
 
@@ -43,7 +44,13 @@ You need a deployed music-warehouse Worker with `READ_TOKEN` set (see
    ```
 
 2. On first launch, enter the Worker URL (for example
-   `https://music.example.com`) and its `READ_TOKEN`.
+   `https://music.example.com`), then click **Sign in with Spotify** and
+   approve in your browser. The Worker mints a read token for this Mac
+   (listed as `macOS app (<computer name>)`) and the app saves it. Or paste
+   `READ_TOKEN` or another read token and click Test connection, then Save.
+
+Tokens from signing in expire after 90 days. When the Worker stops
+accepting the saved token, the app says so; sign in again from Settings (⌘,).
 
 The window reopens where you left it, on the same page and ranges. View ›
 Appearance (or ⌘K, "theme") picks light, dark or Match System.
@@ -71,7 +78,7 @@ for normal builds.
 | What | Where |
 |---|---|
 | Worker URL | `~/Library/Application Support/music-warehouse-gui/config.json` (`worker_url`) |
-| `READ_TOKEN` | macOS Keychain, service `music-warehouse-gui`, account `READ_TOKEN`. Never written to disk. |
+| Read token (signed in or pasted) | macOS Keychain, service `music-warehouse-gui`, account `READ_TOKEN`. Never written to disk. |
 | Window frame, last page, Overview ranges, appearance | `~/Library/Application Support/music-warehouse-gui/ui-state.json` |
 
 Delete `config.json` to get the first-run setup screen again. A broken
@@ -94,7 +101,7 @@ variables:
 ## Worker
 
 The app talks to these Worker routes, all with
-`Authorization: Bearer <READ_TOKEN>`:
+`Authorization: Bearer <token>`:
 
 | Route | Used for |
 |---|---|
@@ -103,6 +110,12 @@ The app talks to these Worker routes, all with
 | `GET /api/top-artists` | Overview top artists |
 | `GET /api/top` | Spotify's live top lists |
 | `GET /api/now-playing` | Now playing strip |
+
+Signing in uses the Worker's native-app flow (see its README, "Signing in
+with Spotify"): the app listens on `http://127.0.0.1:<random port>/callback`,
+opens `/auth/login` in the browser with a PKCE challenge, and exchanges the
+returned code at `POST /auth/token`. Nothing else is listening once the
+browser returns, after five minutes, or when you cancel.
 
 Deploying the Worker and setting `READ_TOKEN` is covered in its
 [README](https://github.com/rcnsh/music-warehouse#deployment). To find an

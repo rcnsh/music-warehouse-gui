@@ -32,3 +32,27 @@ where
         .await
         .map_err(|e| ApiError::Network(format!("request task stopped: {e}")))?
 }
+
+/// Like [`run`], but dropping the returned future stops the work too. A plain
+/// `JoinHandle` keeps its task running when dropped, which for a sign-in
+/// would leave a loopback listener open after the user cancelled.
+pub async fn run_cancellable<F, T>(future: F) -> Result<T, ApiError>
+where
+    F: Future<Output = Result<T, ApiError>> + Send + 'static,
+    T: Send + 'static,
+{
+    let handle = runtime().spawn(future);
+    let _guard = AbortOnDrop(handle.abort_handle());
+    handle
+        .await
+        .map_err(|e| ApiError::Network(format!("request task stopped: {e}")))?
+}
+
+/// Aborts a Tokio task when dropped. Aborting a finished task does nothing.
+pub struct AbortOnDrop(pub tokio::task::AbortHandle);
+
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
