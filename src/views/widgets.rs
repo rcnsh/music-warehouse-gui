@@ -709,6 +709,13 @@ pub fn note(text: impl Into<SharedString>, cx: &App) -> impl IntoElement {
         .child(text.into())
 }
 
+/// The value a ranked list's bars are drawn against: its first, since the
+/// Worker sends lists sorted, and never below 1 so an empty or all-zero
+/// list divides safely. Nothing is re-ranked here.
+pub fn top_scale(values: impl IntoIterator<Item = u32>) -> u32 {
+    values.into_iter().next().unwrap_or(0).max(1)
+}
+
 /// `12,345`.
 pub fn count(n: u64) -> String {
     let digits = n.to_string();
@@ -861,6 +868,13 @@ pub fn hour_points(values: impl IntoIterator<Item = f64>) -> Vec<(SharedString, 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bars_scale_to_the_first_value_and_never_zero() {
+        assert_eq!(top_scale([40, 12, 3]), 40);
+        assert_eq!(top_scale([]), 1);
+        assert_eq!(top_scale([0, 0]), 1);
+    }
 
     #[test]
     fn figures_format_for_reading() {

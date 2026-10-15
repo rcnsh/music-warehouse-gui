@@ -27,7 +27,8 @@ config.json + Keychain ──> AppRoot ──> SetupView      (no config or toke
 3. Stores in `src/state/` own fetched data. Views observe them and render;
    views never call the API directly.
 4. Requests run on a small Tokio runtime (`runtime.rs`). GPUI tasks await the
-   join handle, so store updates land on the main thread.
+   join handle, so store updates land on the main thread, and dropping a
+   task aborts its request.
 
 ## Modules
 
@@ -43,12 +44,12 @@ config.json + Keychain ──> AppRoot ──> SetupView      (no config or toke
 | `src/runtime.rs` | Tokio runtime bridge for reqwest |
 | `src/actions.rs` | Actions, keybindings, menus |
 | `src/appearance.rs` | Light, dark or Match System |
-| `src/state/history.rs` | `HistoryStore`: pages of 200 with `before`, new plays with `after`, jump-to-date anchor; a search and a song or artist `Scope` page a second, filtered list from the Worker |
+| `src/state/history.rs` | `HistoryStore`: pages of 200 with `before` (the Worker's `next_before` cursor when sent), retried with backoff after a failure, new plays with `after`, jump-to-date anchor; a search and a song or artist `Scope` page a second, filtered list from the Worker |
 | `src/state/export.rs` | `CsvExport`: streams `/api/plays.csv` for History's current filters into a `.part` file, renamed when complete |
 | `src/state/overview.rs` | `OverviewStore`: daily counts and top artists for one range, Spotify top lists separately |
 | `src/state/now_playing.rs` | `NowPlayingStore`: 20 s / 30 s polling, exponential backoff, `Retry-After` capped at an hour |
 | `src/state/<page>.rs` | One store per page (artist, track, albums, wrapped, on_repeat, on_this_day, rhythm, top_over_time, eras, concerts) |
-| `src/state/mod.rs` | `Remote<T>`: keeps last good data through a failed refresh; `fetch` runs a request into one; `RecentDays` for the Artist and Track daily charts |
+| `src/state/mod.rs` | `Remote<T>`: keeps last good data through a failed refresh; `fetch` runs a request into one, asking again while the Worker answers "still computing" (503 with `Retry-After`); `RecentDays` for the Artist and Track daily charts |
 | `src/views/nav.rs` | Pages (`Section`, `Page`), sidebar groups, labels, icons, shortcuts, Back stack |
 | `src/views/` | One file per view; `widgets.rs` has shared states and page building blocks |
 | `src/dev_capture.rs` | `dev-capture` feature only: render the window to PNG, dispatch actions, scroll and click on request |

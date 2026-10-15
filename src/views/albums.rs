@@ -99,7 +99,7 @@ fn selection(data: &TopAlbums, tab: usize) -> Selection<'_> {
 }
 
 fn album_rows(albums: &[TopAlbum], cx: &App) -> AnyElement {
-    let top = albums.first().map(|a| a.plays).unwrap_or(0).max(1) as f32;
+    let top = widgets::top_scale(albums.iter().map(|a| a.plays)) as f32;
     v_flex()
         .gap_0p5()
         .children(albums.iter().enumerate().map(|(i, album)| {

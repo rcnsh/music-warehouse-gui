@@ -206,7 +206,7 @@ fn render_day(data: &OnThisDay, cx: &App) -> AnyElement {
 }
 
 fn render_year(year: &OnThisDayYear, this_year: i32, cx: &App) -> AnyElement {
-    let top = year.top_tracks.first().map(|t| t.plays).unwrap_or(0).max(1);
+    let top = widgets::top_scale(year.top_tracks.iter().map(|t| t.plays));
     let detail = format!(
         "{} {} · {}",
         widgets::count(year.plays.into()),

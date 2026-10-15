@@ -187,9 +187,10 @@ example: it once filtered only loaded rows, and now sends `q` to
   History's `Scope` (one song or artist) and search, both sent to the Worker
   as an `api::PlayFilter`; `export.rs` streams `/api/plays.csv` to disk;
   `RecentDays` in `mod.rs` holds the Artist and Track pages' daily counts
-- `src/views/`: one file per view. `nav.rs` names the pages (`Section`, `Page`,
-  sidebar `GROUPS`, Back stack); `shell.rs` holds every page view, the sidebar
-  and top bar; `widgets.rs` holds shared states and page building blocks;
+- `src/views/`: one file per view, each page in its own (see Pages below).
+  `nav.rs` names the pages (`Section`, `Page`, sidebar `GROUPS`, Back stack);
+  `shell.rs` owns the page views and holds the sidebar and top bar;
+  `widgets.rs` holds shared states and page building blocks;
   `recent_days.rs` is the "Plays per day" card both Artist and Track use
 - `src/ui_state.rs`: window frame, last page and ranges in `ui-state.json`
 - `src/dev_capture.rs`: scripted captures, `dev-capture` builds only
@@ -211,7 +212,8 @@ never reach the shell.
 
 Build pages from `views/widgets.rs` rather than restyling: `page` (the
 scrolling column), `page_header`, `section_heading`, `card`, `stat_tile`,
-`RankedRow`, `bar_chart`, `sparkline`, the art helpers, and the formatting
+`RankedRow`, `bar_chart`, `sparkline`, `top_scale` (a ranked list's bar
+scale), the art helpers, and the formatting
 helpers (`count`, `minutes`, `percent`, `plural`, `month_label`,
 `month_span`, `day_label`, `local_day`, `local_day_time`). For a store's
 loading, error and loaded states use `page_body` inside a scrolling page and
