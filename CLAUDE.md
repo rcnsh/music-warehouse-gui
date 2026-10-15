@@ -13,7 +13,8 @@ cargo run --release
 cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test   # the check script
 ```
 
-First launch shows setup: Worker URL plus READ_TOKEN. The URL is saved to
+First launch shows setup: Worker URL, then Sign in with Spotify (mints a
+read device token, `src/signin.rs`) or a pasted READ_TOKEN. The URL is saved to
 `~/Library/Application Support/music-warehouse-gui/config.json`; the token goes
 only to the macOS Keychain (service `music-warehouse-gui`, account
 `READ_TOKEN`). Delete the config file to see first-run setup again.
@@ -150,6 +151,7 @@ searches loaded rows, and paging pauses while it is active for this reason.
 - `src/api.rs`: HTTP client, error classification, URL rules
 - `src/models.rs`: response shapes (fixtures in `tests/fixtures/`, see its NOTES.md)
 - `src/config.rs`: config file and Keychain
+- `src/signin.rs`: Sign in with Spotify (PKCE, loopback redirect, code exchange)
 - `src/dates.rs`: range presets and custom-range parsing in the system timezone
 - `src/runtime.rs`: Tokio runtime that reqwest runs on; GPUI tasks await its handles
 - `src/state/`: entities that own fetched data (history paging, overview, now-playing poller)

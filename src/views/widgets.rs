@@ -10,6 +10,7 @@ use gpui_component::{
 };
 use gpui_kit_assets::IconName;
 
+use crate::actions::OpenSettings;
 use crate::api::ApiError;
 
 /// What to tell the user about an error: a headline, then what to do.
@@ -22,7 +23,8 @@ pub fn describe(error: &ApiError) -> ErrorCopy {
     let (title, detail): (&str, String) = match error {
         ApiError::Unauthorized => (
             "Read token rejected",
-            "The Worker did not accept the saved READ_TOKEN. Open Settings (⌘,) to enter it again."
+            "The Worker no longer accepts the saved token. Tokens from signing in expire after \
+             90 days. Open Settings (⌘,) to sign in with Spotify again or paste a token."
                 .into(),
         ),
         ApiError::NeedsReauth => (
@@ -129,17 +131,20 @@ pub fn error_panel(
     } else {
         IconName::TriangleAlert
     };
+    // Retrying with a rejected token cannot work; signing in again can.
+    let button = if *error == ApiError::Unauthorized {
+        Button::new(id)
+            .small()
+            .label("Sign in again")
+            .on_click(|_, window, cx| window.dispatch_action(Box::new(OpenSettings), cx))
+    } else {
+        Button::new(id).small().label("Retry").on_click(on_retry)
+    };
     state_panel(
         Some(Icon::new(icon)),
         copy.title,
         Some(copy.detail),
-        Some(
-            Button::new(id)
-                .small()
-                .label("Retry")
-                .on_click(on_retry)
-                .into_any_element(),
-        ),
+        Some(button.into_any_element()),
         cx,
     )
 }
