@@ -199,24 +199,38 @@ pub fn spotify_range(state: &UiState) -> Option<TopRange> {
     TopRange::ALL.into_iter().find(|r| r.as_param() == saved)
 }
 
-pub fn load_from(dir: &Path) -> UiState {
-    fs::read_to_string(dir.join(UI_STATE_FILE))
+pub fn load_from(file: &Path) -> UiState {
+    fs::read_to_string(file)
         .ok()
         .and_then(|text| serde_json::from_str(&text).ok())
         .unwrap_or_default()
 }
 
-pub fn save_to(dir: &Path, state: &UiState) -> io::Result<()> {
-    fs::create_dir_all(dir)?;
+pub fn save_to(file: &Path, state: &UiState) -> io::Result<()> {
+    if let Some(dir) = file.parent() {
+        fs::create_dir_all(dir)?;
+    }
     let text = serde_json::to_string_pretty(state).map_err(io::Error::other)?;
-    let tmp = dir.join(format!("{UI_STATE_FILE}.tmp"));
+    let mut tmp = file.as_os_str().to_owned();
+    tmp.push(".tmp");
     fs::write(&tmp, text)?;
-    fs::rename(tmp, dir.join(UI_STATE_FILE))
+    fs::rename(tmp, file)
+}
+
+/// `ui-state.json` beside `config.json`. A dev-capture build can be pointed
+/// elsewhere with `MWGUI_UI_STATE_FILE`, so scripted runs neither move the
+/// real window nor leave it on another page.
+fn state_file() -> Option<PathBuf> {
+    #[cfg(feature = "dev-capture")]
+    if let Some(file) = std::env::var_os("MWGUI_UI_STATE_FILE") {
+        return Some(PathBuf::from(file));
+    }
+    config::config_dir().map(|dir| dir.join(UI_STATE_FILE))
 }
 
 /// The app-wide copy, written back shortly after each change.
 struct Store {
-    dir: Option<PathBuf>,
+    file: Option<PathBuf>,
     state: UiState,
     dirty: bool,
     _save: Option<Task<()>>,
@@ -226,10 +240,10 @@ impl Global for Store {}
 
 /// Loads the saved state and saves any pending change on quit.
 pub fn init(cx: &mut App) -> UiState {
-    let dir = config::config_dir();
-    let state = dir.as_deref().map(load_from).unwrap_or_default();
+    let file = state_file();
+    let state = file.as_deref().map(load_from).unwrap_or_default();
     cx.set_global(Store {
-        dir,
+        file,
         state: state.clone(),
         dirty: false,
         _save: None,
@@ -274,8 +288,8 @@ fn flush(cx: &mut App) {
     if !store.dirty {
         return;
     }
-    if let Some(dir) = &store.dir
-        && let Err(e) = save_to(dir, &store.state)
+    if let Some(file) = &store.file
+        && let Err(e) = save_to(file, &store.state)
     {
         eprintln!("could not save window state: {e}");
     }
@@ -384,18 +398,24 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("mwgui-ui-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join(UI_STATE_FILE), "{not json").unwrap();
-        assert_eq!(load_from(&dir), UiState::default());
+        assert_eq!(load_from(&dir.join(UI_STATE_FILE)), UiState::default());
         fs::write(dir.join(UI_STATE_FILE), r#"{"page":"overview"}"#).unwrap();
-        assert_eq!(load_from(&dir).page, Some(SavedPage::Overview));
+        assert_eq!(
+            load_from(&dir.join(UI_STATE_FILE)).page,
+            Some(SavedPage::Overview)
+        );
         fs::write(dir.join(UI_STATE_FILE), r#"{"page":"top_over_time"}"#).unwrap();
-        assert_eq!(load_from(&dir).page, Some(SavedPage::TopOverTime));
+        assert_eq!(
+            load_from(&dir.join(UI_STATE_FILE)).page,
+            Some(SavedPage::TopOverTime)
+        );
         // A page from a newer build loses only the page, not the window.
         fs::write(
             dir.join(UI_STATE_FILE),
             r#"{"page":"podcasts","window":{"x":1,"y":2,"width":900,"height":700}}"#,
         )
         .unwrap();
-        let state = load_from(&dir);
+        let state = load_from(&dir.join(UI_STATE_FILE));
         assert_eq!(state.page, None);
         assert!(state.window.is_some());
         fs::remove_dir_all(&dir).unwrap();
@@ -415,8 +435,8 @@ mod tests {
             appearance: Some(Appearance::Dark),
         };
         let dir = std::env::temp_dir().join(format!("mwgui-ui-rt-{}", std::process::id()));
-        save_to(&dir, &state).unwrap();
-        assert_eq!(load_from(&dir), state);
+        save_to(&dir.join(UI_STATE_FILE), &state).unwrap();
+        assert_eq!(load_from(&dir.join(UI_STATE_FILE)), state);
         assert_eq!(spotify_range(&state), Some(TopRange::Medium));
         fs::remove_dir_all(&dir).unwrap();
     }
