@@ -1,0 +1,109 @@
+{
+  "track_id": "67XC51nlZncNpHmZ8rOU9a",
+  "plays": [
+    {
+      "played_at_ms": 1792051694684,
+      "track_id": "67XC51nlZncNpHmZ8rOU9a",
+      "context_uri": "spotify:album:79ONNoS4M9tfIA1mYLBYVX",
+      "context_type": "album",
+      "context_name": "Mr. Morale & The Big Steppers",
+      "source": "api",
+      "play_number": 6,
+      "track_name": "We Cry Together",
+      "duration_ms": 341307,
+      "isrc": "USUM72208973",
+      "album_name": "Mr. Morale & The Big Steppers",
+      "image_url": "https://i.scdn.co/image/ab67616d0000b2732e02117d76426a08ac7c174f",
+      "artists": "Kendrick Lamar, Taylour Paige",
+      "artist_list": [
+        {
+          "id": "2YZyLoL8N0Wb9xBt1NhZWg",
+          "name": "Kendrick Lamar"
+        },
+        {
+          "id": "7nkr1fevjIVmgx5biwAWVo",
+          "name": "Taylour Paige"
+        }
+      ],
+      "first_play": false
+    },
+    {
+      "played_at_ms": 1792046370497,
+      "track_id": "67XC51nlZncNpHmZ8rOU9a",
+      "context_uri": "spotify:album:79ONNoS4M9tfIA1mYLBYVX",
+      "context_type": "album",
+      "context_name": "Mr. Morale & The Big Steppers",
+      "source": "api",
+      "play_number": 5,
+      "track_name": "We Cry Together",
+      "duration_ms": 341307,
+      "isrc": "USUM72208973",
+      "album_name": "Mr. Morale & The Big Steppers",
+      "image_url": "https://i.scdn.co/image/ab67616d0000b2732e02117d76426a08ac7c174f",
+      "artists": "Kendrick Lamar, Taylour Paige",
+      "artist_list": [
+        {
+          "id": "2YZyLoL8N0Wb9xBt1NhZWg",
+          "name": "Kendrick Lamar"
+        },
+        {
+          "id": "7nkr1fevjIVmgx5biwAWVo",
+          "name": "Taylour Paige"
+        }
+      ],
+      "first_play": false
+    },
+    {
+      "played_at_ms": 1791993316991,
+      "track_id": "67XC51nlZncNpHmZ8rOU9a",
+      "context_uri": "spotify:album:79ONNoS4M9tfIA1mYLBYVX",
+      "context_type": "album",
+      "context_name": "Mr. Morale & The Big Steppers",
+      "source": "api",
+      "play_number": 4,
+      "track_name": "We Cry Together",
+      "duration_ms": 341307,
+      "isrc": "USUM72208973",
+      "album_name": "Mr. Morale & The Big Steppers",
+      "image_url": "https://i.scdn.co/image/ab67616d0000b2732e02117d76426a08ac7c174f",
+      "artists": "Kendrick Lamar, Taylour Paige",
+      "artist_list": [
+        {
+          "id": "2YZyLoL8N0Wb9xBt1NhZWg",
+          "name": "Kendrick Lamar"
+        },
+        {
+          "id": "7nkr1fevjIVmgx5biwAWVo",
+          "name": "Taylour Paige"
+        }
+      ],
+      "first_play": false
+    },
+    {
+      "played_at_ms": 1731000000000,
+      "track_id": "67XC51nlZncNpHmZ8rOU9a",
+      "context_uri": "spotify:playlist:37i9dQZF1DX0XUsuxWHRQd",
+      "context_type": "playlist",
+      "context_name": null,
+      "source": "api",
+      "play_number": 1,
+      "track_name": "We Cry Together",
+      "duration_ms": 341307,
+      "isrc": "USUM72208973",
+      "album_name": "Mr. Morale & The Big Steppers",
+      "image_url": "https://i.scdn.co/image/ab67616d0000b2732e02117d76426a08ac7c174f",
+      "artists": "Kendrick Lamar, Taylour Paige",
+      "artist_list": [
+        {
+          "id": "2YZyLoL8N0Wb9xBt1NhZWg",
+          "name": "Kendrick Lamar"
+        },
+        {
+          "id": "name:taylour paige",
+          "name": "Taylour Paige"
+        }
+      ],
+      "first_play": true
+    }
+  ]
+}
