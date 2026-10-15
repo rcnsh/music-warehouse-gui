@@ -1,11 +1,11 @@
 use std::collections::HashSet;
 
 use chrono::{DateTime, NaiveDate};
-use gpui::{Context, Task};
+use gpui::{Context, SharedString, Task};
 
-use crate::api::{ApiClient, ApiError};
+use crate::api::{ApiClient, ApiError, PlayFilter};
 use crate::dates;
-use crate::models::{Play, RecentlyPlayedItem, pick_image};
+use crate::models::{Credit, Play, RecentlyPlayedItem, pick_image};
 use crate::runtime;
 
 /// Rows per request. The Worker caps `limit` at 500; 200 fills a tall window
@@ -102,21 +102,108 @@ pub fn live_play(item: &RecentlyPlayedItem) -> Option<Play> {
         .iter()
         .filter_map(|a| a.name.as_deref())
         .collect();
+    let credits = track
+        .artists
+        .iter()
+        .filter_map(|a| {
+            Some(Credit {
+                id: a.id.clone().filter(|id| !id.is_empty()),
+                name: a.name.clone()?,
+            })
+        })
+        .collect();
     let context = item.context.as_ref();
     Some(Play {
         played_at_ms,
         track_id,
         context_uri: context.and_then(|c| c.uri.clone()),
         context_type: context.and_then(|c| c.kind.clone()),
-        source: None,
         track_name: track.name.clone(),
-        duration_ms: None,
         album_name: track.album.as_ref().and_then(|a| a.name.clone()),
         // The largest size, as stored rows have: renditions are picked per
         // use from that URL.
         image_url: pick_image(track.artwork(), 640).map(str::to_owned),
         artists: (!artists.is_empty()).then(|| artists.join(", ")),
+        artist_list: Some(credits),
+        // Spotify's payload names no context and numbers no plays.
+        ..Play::default()
     })
+}
+
+/// One song's or one artist's plays, which History can be narrowed to
+/// instead of (or as well as) a text search. `name` is only for display.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Scope {
+    /// Every edition of the song, as the Track page counts it.
+    Song {
+        id: SharedString,
+        name: SharedString,
+    },
+    /// Plays crediting the artist first, as the Artist page counts them. The
+    /// id may be a `name:` placeholder.
+    Artist {
+        id: SharedString,
+        name: SharedString,
+    },
+}
+
+impl Scope {
+    pub fn name(&self) -> &str {
+        match self {
+            Self::Song { name, .. } | Self::Artist { name, .. } => name,
+        }
+    }
+
+    /// The name for sentences, "this song" or "this artist" when unknown.
+    pub fn display_name(&self) -> &str {
+        match (self, self.name()) {
+            (Self::Song { .. }, "") => "this song",
+            (Self::Artist { .. }, "") => "this artist",
+            (_, name) => name,
+        }
+    }
+
+    /// "Song: DNA." for the chip that shows it.
+    pub fn label(&self) -> String {
+        let kind = match self {
+            Self::Song { .. } => "Song",
+            Self::Artist { .. } => "Artist",
+        };
+        format!("{kind}: {}", self.display_name())
+    }
+
+    fn filter(&self) -> PlayFilter {
+        match self {
+            Self::Song { id, .. } => PlayFilter::song(id.to_string()),
+            Self::Artist { id, .. } => PlayFilter::artist(id),
+        }
+    }
+}
+
+/// What the Worker is asked for: the scope narrowed by the search text.
+pub fn list_filter(scope: Option<&Scope>, query: &str) -> PlayFilter {
+    scope
+        .map(Scope::filter)
+        .unwrap_or_default()
+        .search(Some(query))
+}
+
+/// Text searches walk further and join more names per page than one song's
+/// or artist's plays, so their pages are smaller.
+fn page_size(filter: &PlayFilter) -> u32 {
+    if filter.q.is_some() {
+        SEARCH_PAGE_SIZE
+    } else {
+        PAGE_SIZE
+    }
+}
+
+/// The plays a list shows, as a CSV download asks for them.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExportRequest {
+    pub filter: PlayFilter,
+    pub before: Option<i64>,
+    pub after: Option<i64>,
 }
 
 /// The live plays the warehouse has not stored yet, newest first: those
@@ -147,21 +234,19 @@ struct Feed {
     _task: Option<Task<()>>,
 }
 
-/// A filter the Worker answers over the whole history (`q`), paged like the
-/// unfiltered list.
-struct Search {
-    query: String,
-    feed: Feed,
-}
-
 /// Stored play history, extended page by page with `before`. Reads only
 /// stored rows, so it keeps working when the Spotify grant is dead.
 pub struct HistoryStore {
     client: ApiClient,
     main: Feed,
-    /// While set, every accessor reads the search results instead of `main`,
-    /// which stays loaded so clearing the filter is instant.
-    search: Option<Search>,
+    /// The search text, applied by the Worker over the whole history.
+    query: String,
+    /// One song or artist the list is narrowed to.
+    scope: Option<Scope>,
+    /// Present while `query` or `scope` narrows the list. Every accessor
+    /// then reads it instead of `main`, which stays loaded so clearing the
+    /// filter is instant.
+    filtered: Option<Feed>,
     /// The day History was jumped to, if any. While set, the list starts at
     /// the end of that day instead of the newest play, and live updates pause
     /// because newer plays would not join up with the loaded rows.
@@ -181,7 +266,9 @@ impl HistoryStore {
         let mut store = Self {
             client,
             main: Feed::default(),
-            search: None,
+            query: String::new(),
+            scope: None,
+            filtered: None,
             anchor: None,
             since: None,
             live: Vec::new(),
@@ -189,20 +276,17 @@ impl HistoryStore {
             _newer_task: None,
             _live_task: None,
         };
-        store.fetch(None, cx);
+        store.fetch(false, None, cx);
         store.fetch_live(cx);
         store
     }
 
     fn feed(&self) -> &Feed {
-        self.search.as_ref().map_or(&self.main, |s| &s.feed)
+        self.filtered.as_ref().unwrap_or(&self.main)
     }
 
     fn feed_mut(&mut self) -> &mut Feed {
-        match &mut self.search {
-            Some(search) => &mut search.feed,
-            None => &mut self.main,
-        }
+        self.filtered.as_mut().unwrap_or(&mut self.main)
     }
 
     pub fn plays(&self) -> &[Play] {
@@ -231,47 +315,90 @@ impl HistoryStore {
 
     /// Plays Spotify reports that the warehouse has not stored yet, to show
     /// above the stored rows. Only on the newest, unfiltered list: they are
-    /// newer than any jumped-to day, and no search matched them.
+    /// newer than any jumped-to day, and no filter was applied to them.
     pub fn unsaved(&self) -> &[Play] {
-        if self.search.is_some() || self.anchor.is_some() {
+        if self.filtered.is_some() || self.anchor.is_some() {
             return &[];
         }
         &self.unsaved
     }
 
-    /// Limits searches to plays from the start of `day` on, or lifts the
-    /// limit with `None`. Restarts a search that is showing.
+    /// Limits a filtered list to plays from the start of `day` on, or lifts
+    /// the limit with `None`. Restarts a filtered list that is showing.
     pub fn set_since(&mut self, day: Option<NaiveDate>, cx: &mut Context<Self>) {
         if self.since == day {
             return;
         }
         self.since = day;
-        if let Some(search) = &mut self.search {
-            search.feed = Feed::default();
-            let before = self.anchor_before();
-            self.fetch(before, cx);
-        }
+        self.restart_filtered(cx);
         cx.notify();
     }
 
+    /// The search text, if any.
     pub fn query(&self) -> Option<&str> {
-        self.search.as_ref().map(|s| s.query.as_str())
+        Some(self.query.as_str()).filter(|q| !q.is_empty())
     }
 
-    /// Shows plays matching `query` from across the whole history, or the
-    /// unfiltered list again when it is empty.
+    pub fn scope(&self) -> Option<&Scope> {
+        self.scope.as_ref()
+    }
+
+    pub fn is_filtered(&self) -> bool {
+        self.filtered.is_some()
+    }
+
+    /// Shows plays matching `query` from across the whole history (inside
+    /// the scope, if one is set), or drops the search when it is empty.
     pub fn set_query(&mut self, query: &str, cx: &mut Context<Self>) {
-        if self.query().unwrap_or_default() == query {
+        if self.query == query {
             return;
         }
-        self.search = (!query.is_empty()).then(|| Search {
-            query: query.to_owned(),
-            feed: Feed::default(),
-        });
-        if self.search.is_some() {
-            self.fetch(self.anchor_before(), cx);
+        self.query = query.to_owned();
+        self.restart_filtered(cx);
+        cx.notify();
+    }
+
+    /// Narrows the list to one song or artist, keeping any search and date
+    /// bounds, or widens it again with `None`.
+    pub fn set_scope(&mut self, scope: Option<Scope>, cx: &mut Context<Self>) {
+        if self.scope == scope {
+            return;
+        }
+        self.scope = scope;
+        self.restart_filtered(cx);
+        cx.notify();
+    }
+
+    /// Every play of one song or artist, newest first, with nothing else
+    /// narrowing it: how another page opens History.
+    pub fn show_scope(&mut self, scope: Scope, cx: &mut Context<Self>) {
+        self.query.clear();
+        self.since = None;
+        self.scope = Some(scope);
+        if self.anchor.take().is_some() {
+            self.reload(cx);
+            self.fetch_live(cx);
+        } else {
+            self.restart_filtered(cx);
         }
         cx.notify();
+    }
+
+    /// What a CSV of this list asks for: its filter and date bounds. The
+    /// unsaved plays above it are Spotify's, not the warehouse's, so they
+    /// are not part of it.
+    pub fn export_request(&self) -> ExportRequest {
+        let filter = list_filter(self.scope.as_ref(), &self.query);
+        let after = if filter.is_empty() {
+            None
+        } else {
+            self.since_after()
+        };
+        ExportRequest {
+            filter,
+            before: self.anchor_before(),
+            after,
+        }
     }
 
     /// Reloads what is on screen: from the newest play, or from the end of
@@ -299,27 +426,30 @@ impl HistoryStore {
         self.reload(cx);
     }
 
-    /// Restarts the unfiltered list and any search from the anchor, so both
-    /// agree on where history starts.
+    /// Restarts the unfiltered list and any filtered one from the anchor, so
+    /// both agree on where history starts.
     fn reload(&mut self, cx: &mut Context<Self>) {
         let before = self.anchor_before();
-        let search = self.search.take();
         self.main = Feed::default();
         self._newer_task = None;
-        self.fetch(before, cx);
+        self.fetch(false, before, cx);
         self.update_unsaved();
-        if let Some(search) = search {
-            self.search = Some(Search {
-                query: search.query,
-                feed: Feed::default(),
-            });
-            self.fetch(before, cx);
+        self.restart_filtered(cx);
+    }
+
+    /// Starts the filtered list over for the current search, scope and
+    /// bounds, or drops it when nothing narrows the list.
+    fn restart_filtered(&mut self, cx: &mut Context<Self>) {
+        let filtered = !list_filter(self.scope.as_ref(), &self.query).is_empty();
+        self.filtered = filtered.then(Feed::default);
+        if filtered {
+            self.fetch(true, self.anchor_before(), cx);
         }
     }
 
     /// Adds plays ingested since the newest loaded one. Cheap: the Worker
     /// reads only rows after the cursor, usually none. Skipped while jumped
-    /// to a day, searching, loading, or failing.
+    /// to a day, filtering, loading, or failing.
     pub fn check_newer(&mut self, cx: &mut Context<Self>) {
         if self.anchor.is_none() {
             self.fetch_live(cx);
@@ -328,7 +458,7 @@ impl HistoryStore {
             return;
         };
         if self.anchor.is_some()
-            || self.search.is_some()
+            || self.filtered.is_some()
             || self.main.loading
             || self.main.error.is_some()
         {
@@ -371,14 +501,14 @@ impl HistoryStore {
             return;
         }
         let before = feed.log.next_before().or(self.anchor_before());
-        self.fetch(before, cx);
+        self.fetch(self.filtered.is_some(), before, cx);
     }
 
     /// Clears an error and repeats the request that failed.
     pub fn retry(&mut self, cx: &mut Context<Self>) {
         self.feed_mut().error = None;
         let before = self.feed().log.next_before().or(self.anchor_before());
-        self.fetch(before, cx);
+        self.fetch(self.filtered.is_some(), before, cx);
     }
 
     /// Asks Spotify for its last plays. They are an optional extra: when
@@ -423,32 +553,29 @@ impl HistoryStore {
             .and_then(|day| dates::end_of_local_day_ms(day, &chrono::Local))
     }
 
-    /// Fetches the next page of whichever list is showing.
-    fn fetch(&mut self, before: Option<i64>, cx: &mut Context<Self>) {
-        let query = self.query().map(str::to_owned);
-        // The start bound is for searches; the unfiltered list always runs
-        // back to the first play.
-        let after = query.as_ref().and(self.since_after());
-        let page_size = if query.is_some() {
-            SEARCH_PAGE_SIZE
+    /// Fetches the next page of the unfiltered list or the filtered one.
+    fn fetch(&mut self, filtered: bool, before: Option<i64>, cx: &mut Context<Self>) {
+        let filter = if filtered {
+            list_filter(self.scope.as_ref(), &self.query)
         } else {
-            PAGE_SIZE
+            PlayFilter::default()
         };
+        // The start bound narrows filtered lists; the unfiltered list always
+        // runs back to the first play.
+        let after = if filtered { self.since_after() } else { None };
+        let page_size = page_size(&filter);
         let client = self.client.clone();
         let task = cx.spawn(async move |this, cx| {
-            let q = query.clone();
             let result =
-                runtime::run(
-                    async move { client.plays(page_size, before, after, q.as_deref()).await },
-                )
-                .await;
+                runtime::run(async move { client.plays(page_size, before, after, &filter).await })
+                    .await;
             this.update(cx, |this, cx| {
                 // The task belongs to its feed, so a feed that was replaced
                 // never sees this; one that is still here is the right one.
-                let feed = match (&query, &mut this.search) {
-                    (None, _) => &mut this.main,
-                    (Some(_), Some(search)) => &mut search.feed,
-                    (Some(_), None) => return,
+                let feed = match (filtered, &mut this.filtered) {
+                    (false, _) => &mut this.main,
+                    (true, Some(feed)) => feed,
+                    (true, None) => return,
                 };
                 feed.loading = false;
                 match result {
@@ -460,7 +587,11 @@ impl HistoryStore {
             })
             .ok();
         });
-        let feed = self.feed_mut();
+        let feed = if filtered {
+            self.filtered.get_or_insert_with(Feed::default)
+        } else {
+            &mut self.main
+        };
         feed.loading = true;
         feed._task = Some(task);
         cx.notify();
@@ -475,15 +606,64 @@ mod tests {
         Play {
             played_at_ms: ms,
             track_id: track.into(),
-            context_uri: None,
-            context_type: None,
-            source: None,
-            track_name: None,
-            duration_ms: None,
-            album_name: None,
-            image_url: None,
-            artists: None,
+            ..Play::default()
         }
+    }
+
+    fn song() -> Scope {
+        Scope::Song {
+            id: "67XC51nlZncNpHmZ8rOU9a".into(),
+            name: "We Cry Together".into(),
+        }
+    }
+
+    #[test]
+    fn a_scope_pages_one_song_or_artist_and_narrows_a_search() {
+        assert!(list_filter(None, "").is_empty());
+        assert_eq!(
+            list_filter(None, "dna"),
+            PlayFilter::default().search(Some("dna"))
+        );
+        assert_eq!(
+            list_filter(Some(&song()), ""),
+            PlayFilter::song("67XC51nlZncNpHmZ8rOU9a")
+        );
+        let artist = Scope::Artist {
+            id: "name:sigur rós".into(),
+            name: "Sigur Rós".into(),
+        };
+        let filter = list_filter(Some(&artist), "hopp");
+        assert_eq!(filter.artist_id.as_deref(), Some("name:sigur rós"));
+        assert_eq!(filter.artist_name.as_deref(), Some("sigur rós"));
+        assert_eq!(filter.q.as_deref(), Some("hopp"));
+        // Searches get the smaller pages; a song's plays the usual ones.
+        assert_eq!(page_size(&filter), SEARCH_PAGE_SIZE);
+        assert_eq!(page_size(&list_filter(Some(&song()), "")), PAGE_SIZE);
+    }
+
+    #[test]
+    fn scopes_label_their_chip() {
+        assert_eq!(song().label(), "Song: We Cry Together");
+        let unnamed = Scope::Artist {
+            id: "abc".into(),
+            name: "".into(),
+        };
+        assert_eq!(unnamed.label(), "Artist: this artist");
+    }
+
+    #[test]
+    fn live_plays_keep_their_credit_ids() {
+        let path = format!(
+            "{}/tests/fixtures/recently-played.json",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let body = std::fs::read_to_string(path).unwrap();
+        let response: crate::models::RecentlyPlayedResponse = serde_json::from_str(&body).unwrap();
+        let play = live_play(&response.items[0]).unwrap();
+        let credits = play.credits();
+        assert_eq!(credits[0].name, "Kendrick Lamar");
+        assert!(credits[0].id.is_some());
+        assert_eq!(play.play_number, None);
     }
 
     #[test]

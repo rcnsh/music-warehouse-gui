@@ -15,22 +15,29 @@ pub const MAX_RANGE_DAYS: u64 = 3659;
 pub enum RangePreset {
     Last7Days,
     Last30Days,
+    Last90Days,
     LastYear,
     Custom,
 }
 
 impl RangePreset {
-    pub const ALL: [RangePreset; 4] = [
+    pub const ALL: [RangePreset; 5] = [
         Self::Last7Days,
         Self::Last30Days,
+        Self::Last90Days,
         Self::LastYear,
         Self::Custom,
     ];
+
+    /// The ranges an Artist or Track page charts by day. A week of one
+    /// artist is too few bars to say much.
+    pub const RECENT: [RangePreset; 3] = [Self::Last30Days, Self::Last90Days, Self::LastYear];
 
     pub fn label(self) -> &'static str {
         match self {
             Self::Last7Days => "7d",
             Self::Last30Days => "30d",
+            Self::Last90Days => "90d",
             Self::LastYear => "1y",
             Self::Custom => "Custom",
         }
@@ -41,6 +48,7 @@ impl RangePreset {
         match self {
             Self::Last7Days => Some(7),
             Self::Last30Days => Some(30),
+            Self::Last90Days => Some(90),
             Self::LastYear => Some(365),
             Self::Custom => None,
         }
@@ -200,6 +208,10 @@ mod tests {
         let month = RangePreset::Last30Days.resolve(today).unwrap();
         assert_eq!(month.from(), d(2026, 9, 8));
         assert_eq!(month.day_count(), 30);
+
+        let quarter = RangePreset::Last90Days.resolve(today).unwrap();
+        assert_eq!(quarter.from(), d(2026, 7, 10));
+        assert_eq!(quarter.day_count(), 90);
 
         let year = RangePreset::LastYear.resolve(today).unwrap();
         assert_eq!(year.from(), d(2025, 10, 8));

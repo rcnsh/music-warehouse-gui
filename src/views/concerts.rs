@@ -19,7 +19,6 @@ use gpui_component::{
 };
 use gpui_kit_assets::IconName;
 
-use crate::actions::OpenArtist;
 use crate::api::ApiClient;
 use crate::models::{Concert, ConcertsResponse};
 use crate::state::concerts::{ConcertsStore, NEW_DAYS};
@@ -229,19 +228,8 @@ fn empty(icon: IconName, title: &str, detail: &'static str, cx: &App) -> AnyElem
 fn render_show(region: &str, index: usize, show: &Concert, cx: &App) -> AnyElement {
     let muted = cx.theme().muted_foreground;
     let id = format!("concert-{region}-{index}");
-    let names = widgets::artist_names(&show.artists);
-    let mut artists = h_flex().flex_wrap().font_semibold();
-    for (j, name) in names.iter().enumerate() {
-        if j > 0 {
-            artists = artists.child(div().pr_1().child(","));
-        }
-        artists = artists.child(widgets::link(
-            SharedString::from(format!("{id}-artist-{j}")),
-            name.to_string(),
-            OpenArtist::by_name(name),
-            cx,
-        ));
-    }
+    let artists =
+        widgets::credit_links(format!("{id}-artist"), &show.credits(), cx).font_semibold();
     let place = [show.venue.as_deref(), show.city.as_deref()]
         .into_iter()
         .flatten()

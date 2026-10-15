@@ -4,6 +4,8 @@
 //! The shell calls only `new`, `activate`, `refresh`, `set_track` and
 //! `Focusable::focus_handle`.
 
+use std::rc::Rc;
+
 use gpui::AppContext as _;
 use gpui::{
     AnyElement, App, Context, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement,
@@ -13,12 +15,12 @@ use gpui::{
 use gpui_component::{ActiveTheme, StyledExt, h_flex, v_flex};
 use gpui_kit_assets::IconName;
 
-use crate::actions::OpenArtist;
+use crate::actions::{OpenArtist, ShowPlaysOfTrack};
 use crate::api::ApiClient;
 use crate::models::{Rendition, TrackHistory, album_rendition};
 use crate::state::track::TrackStore;
-use crate::views::artist::{is_spotify_id, months_card, open_in_spotify, stat_tiles};
-use crate::views::{play_detail, widgets};
+use crate::views::artist::{header_controls, is_spotify_id, months_card, stat_tiles};
+use crate::views::{play_detail, recent_days, widgets};
 
 pub struct TrackView {
     store: Entity<TrackStore>,
@@ -72,6 +74,13 @@ impl Focusable for TrackView {
 impl Render for TrackView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let retry = cx.listener(|this, _, _, cx| this.refresh(cx));
+        let daily_retry = cx.listener(|this, _, _, cx| this.refresh(cx));
+        let store_handle = self.store.downgrade();
+        let on_pick: recent_days::PickRange = Rc::new(move |preset, _, cx| {
+            store_handle
+                .update(cx, |s, cx| s.set_daily_preset(preset, cx))
+                .ok();
+        });
         let store = self.store.read(cx);
         let page = widgets::page("track").track_focus(&self.focus);
         let Some(id) = store.id.clone() else {
@@ -83,6 +92,7 @@ impl Render for TrackView {
             ));
         };
         let refreshing = store.history.loading && store.history.data.is_some();
+        let daily = recent_days::card("track-daily", &store.daily, on_pick, daily_retry, cx);
         page.child(header(store.history.data.as_ref(), &id, refreshing, cx))
             .child(widgets::page_body(
                 "track-retry",
@@ -90,7 +100,7 @@ impl Render for TrackView {
                 "Loading song…",
                 retry,
                 cx,
-                |data| render_history(data, cx),
+                |data| render_history(data, daily, cx),
             ))
     }
 }
@@ -127,7 +137,13 @@ fn header(data: Option<&TrackHistory>, id: &str, refreshing: bool, cx: &App) -> 
                 .flex_1()
                 .min_w_0()
                 .gap_0p5()
-                .child(div().text_xl().font_semibold().truncate().child(title))
+                .child(
+                    div()
+                        .text_xl()
+                        .font_semibold()
+                        .truncate()
+                        .child(title.clone()),
+                )
                 .when_some(artist, |this, artist| {
                     let open = OpenArtist::by_name(&artist);
                     this.child(div().text_base().child(widgets::link(
@@ -139,13 +155,15 @@ fn header(data: Option<&TrackHistory>, id: &str, refreshing: bool, cx: &App) -> 
                 })
                 .child(div().text_sm().text_color(muted).child(detail)),
         )
-        .when(is_spotify_id(id), |this| {
-            this.child(open_in_spotify(play_detail::track_url(id)))
-        })
+        .child(header_controls(
+            ShowPlaysOfTrack::new(id.to_owned(), title),
+            is_spotify_id(id).then(|| play_detail::track_url(id)),
+            "track-every-play",
+        ))
         .into_any_element()
 }
 
-fn render_history(data: &TrackHistory, cx: &App) -> AnyElement {
+fn render_history(data: &TrackHistory, daily: AnyElement, cx: &App) -> AnyElement {
     if data.plays == 0 {
         let detail = if data.track.name.is_none() {
             "This song is not in the warehouse."
@@ -168,6 +186,7 @@ fn render_history(data: &TrackHistory, cx: &App) -> AnyElement {
             data.last_played.as_deref(),
             cx,
         ))
+        .child(daily)
         .child(months_card("track-months", &data.months, cx))
         .into_any_element()
 }

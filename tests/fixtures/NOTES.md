@@ -26,3 +26,11 @@ Added on 2026-10-15 for the page foundation:
 | `plays-search-after.json` | `GET /api/plays?limit=3&q=kendrick&after=…`, `_meta` removed |
 | `stats-*.json`, `wrapped.json`, `wrapped-ranges.json` | Written from the Worker's `main` source (`src/stats/*.ts`, `src/wrapped.ts`): the deployed Worker could not answer these at capture. Figures are illustrative. |
 | `stats-eras.json`, `stats-eras-single.json`, `concerts.json` | Written in `main`'s shape (era names, free-form region keys with `regions` labels), which is newer than the deployed Worker. Era and region names, venues and URLs are made up. |
+
+Added on 2026-10-15 for the newer play and page fields:
+
+| File | Source |
+|---|---|
+| `plays-scoped.json` | `GET /api/plays?limit=3&track_id=…` (rows carry `play_number`, `first_play`, `context_name`, `artist_list`, and the echoed `track_id`), plus one hand-written first play from a playlist with an unresolved name and a `name:` credit |
+| `daily-artist.json` | `GET /api/daily?from=2026-10-01&to=2026-10-07&tz=Europe/London&artist_id=…` |
+| `concerts.json`, `wrapped.json`, `stats-top-over-time.json` | Edited by hand to add the Worker's newer ids: `artist_list` on two concerts (one credit without an id, a third event with `null`), ids on Wrapped artists, songs, albums, months and discoveries, and `track_id` on Top Over Time songs except the last, to cover an older Worker |

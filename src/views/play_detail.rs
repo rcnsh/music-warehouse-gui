@@ -2,8 +2,8 @@
 //! stored row itself; nothing is fetched or derived across rows.
 
 use gpui::{
-    AnyElement, App, ClickEvent, IntoElement, ParentElement, SharedString, Styled, Window, div,
-    prelude::FluentBuilder, px,
+    AnyElement, App, ClickEvent, InteractiveElement, IntoElement, ParentElement, SharedString,
+    StatefulInteractiveElement, Styled, Window, div, prelude::FluentBuilder, px,
 };
 use gpui_component::{
     ActiveTheme, Sizable, StyledExt,
@@ -12,7 +12,7 @@ use gpui_component::{
 };
 use gpui_kit_assets::IconName;
 
-use crate::actions::{OpenArtist, OpenTrack};
+use crate::actions::{OpenTrack, ShowPlaysOfTrack};
 use crate::dates;
 use crate::models::{Play, Rendition, album_rendition};
 use crate::views::widgets;
@@ -33,8 +33,8 @@ pub fn copy_text(play: &Play) -> String {
 }
 
 /// Where the play started, plus a link to it when Spotify has a page for it.
-/// The warehouse stores the context URI but not its name, so playlists are
-/// described by kind only.
+/// The Worker names the playlist, album or artist when it has looked it up;
+/// until then only the kind is known.
 pub fn context_line(play: &Play) -> (String, Option<String>) {
     if play.source.as_deref() == Some("export") {
         return (
@@ -43,17 +43,56 @@ pub fn context_line(play: &Play) -> (String, Option<String>) {
         );
     }
     let link = play.context_uri.as_deref().and_then(context_url);
-    let label = match play.context_type.as_deref() {
-        Some("album") => "Played from the album",
-        Some("playlist") => "Played from a playlist",
-        Some("artist") => "Played from the artist's page",
-        Some("collection") => "Played from Liked Songs",
-        Some("show") => "Played from a show",
-        Some(_) => "Played from Spotify",
+    let kind = play.context_type.as_deref();
+    let label = match (context_name(play), kind) {
+        (Some(name), Some("album")) => format!("Played from the album “{name}”"),
+        (Some(name), Some("playlist")) => format!("Played from the playlist “{name}”"),
+        (Some(name), Some("artist")) => format!("Played from {name}'s artist page"),
+        (Some(name), Some("show")) => format!("Played from the show “{name}”"),
+        (Some(name), _) => format!("Played from “{name}”"),
+        (None, Some("album")) => "Played from the album".into(),
+        (None, Some("playlist")) => "Played from a playlist".into(),
+        (None, Some("artist")) => "Played from the artist's page".into(),
+        (None, Some("collection")) => "Played from Liked Songs".into(),
+        (None, Some("show")) => "Played from a show".into(),
+        (None, Some(_)) => "Played from Spotify".into(),
         // Roughly a third of live plays: search results, the queue or radio.
-        None => "Played from search, the queue or radio",
+        (None, None) => "Played from search, the queue or radio".into(),
     };
-    (label.into(), link)
+    (label, link)
+}
+
+fn context_name(play: &Play) -> Option<&str> {
+    play.context_name.as_deref().filter(|name| !name.is_empty())
+}
+
+/// Where the play started, short enough for a table column: the context's
+/// name, else its kind. Empty for plays with no context.
+pub fn context_short(play: &Play) -> String {
+    if let Some(name) = context_name(play) {
+        return name.to_owned();
+    }
+    let kind = match play.context_type.as_deref() {
+        _ if play.source.as_deref() == Some("export") => "",
+        Some("album") => "An album",
+        Some("playlist") => "A playlist",
+        Some("artist") => "An artist page",
+        Some("collection") => "Liked Songs",
+        Some("show") => "A show",
+        _ => "",
+    };
+    kind.to_owned()
+}
+
+/// "37th play" or "First play ever". `None` for a play the Worker has not
+/// numbered yet, and for plays Spotify reported but the warehouse has not
+/// stored.
+pub fn play_number(play: &Play) -> Option<String> {
+    if play.first_play == Some(true) || play.play_number == Some(1) {
+        return Some("First play ever".into());
+    }
+    play.play_number
+        .map(|n| format!("{} play", widgets::ordinal(n)))
 }
 
 /// `spotify:playlist:abc` → `https://open.spotify.com/playlist/abc`.
@@ -100,7 +139,10 @@ pub fn render(play: &Play, unsaved: bool, actions: DetailActions, cx: &App) -> A
             .child(div().text_sm().child(value))
     };
 
+    // Scrolls, so a short window still reaches the buttons at the bottom.
     v_flex()
+        .id("play-detail")
+        .overflow_y_scroll()
         .w(px(300.))
         .h_full()
         .flex_shrink_0()
@@ -138,9 +180,7 @@ pub fn render(play: &Play, unsaved: bool, actions: DetailActions, cx: &App) -> A
                     OpenTrack::new(play.track_id.clone()),
                     cx,
                 )))
-                .when_some(play.artists.as_deref(), |this, artists| {
-                    this.child(artist_links(artists, cx))
-                })
+                .child(widgets::credit_links("detail-artist", &play.credits(), cx).text_sm())
                 .child(
                     div()
                         .text_sm()
@@ -157,6 +197,9 @@ pub fn render(play: &Play, unsaved: bool, actions: DetailActions, cx: &App) -> A
             )
         })
         .child(fact("Played", played_at))
+        .when_some(play_number(play), |this, number| {
+            this.child(fact("Of this song", number))
+        })
         .when_some(play.duration_ms, |this, ms| {
             this.child(fact("Length", format_duration(ms)))
         })
@@ -183,41 +226,31 @@ pub fn render(play: &Play, unsaved: bool, actions: DetailActions, cx: &App) -> A
                 ),
         )
         .child({
-            let open = OpenTrack::new(play.track_id.clone());
+            let show = ShowPlaysOfTrack::new(
+                play.track_id.clone(),
+                play.track_name.clone().unwrap_or_default(),
+            );
             Button::new("detail-track")
                 .xsmall()
                 .ghost()
-                .icon(IconName::Music)
+                .icon(IconName::ListMusic)
                 .label("Every play of this song")
-                .on_click(move |_, window, cx| window.dispatch_action(Box::new(open.clone()), cx))
+                .on_click(move |_, window, cx| window.dispatch_action(Box::new(show.clone()), cx))
         })
         .when_some(context_link, |this, link| {
+            let label = match context_name(play) {
+                Some(name) => format!("Open “{name}” in Spotify"),
+                None => "Open where it was played from".into(),
+            };
             this.child(
                 Button::new("detail-context")
                     .xsmall()
                     .ghost()
-                    .label("Open where it was played from")
+                    .label(label)
                     .on_click(move |_, _, cx| cx.open_url(&link)),
             )
         })
         .into_any_element()
-}
-
-/// Each artist a separate link, comma-separated as in the table.
-fn artist_links(artists: &str, cx: &App) -> AnyElement {
-    let mut row = h_flex().flex_wrap().text_sm();
-    for (ix, name) in widgets::artist_names(artists).into_iter().enumerate() {
-        if ix > 0 {
-            row = row.child(div().pr_1().child(","));
-        }
-        row = row.child(widgets::link(
-            ("detail-artist", ix),
-            name.to_owned(),
-            OpenArtist::by_name(name),
-            cx,
-        ));
-    }
-    row.into_any_element()
 }
 
 #[cfg(test)]
@@ -233,10 +266,42 @@ mod tests {
             source: Some("api".into()),
             track_name: Some("We Cry Together".into()),
             duration_ms: Some(341_307),
-            album_name: None,
-            image_url: None,
             artists: Some("Kendrick Lamar, Taylour Paige".into()),
+            ..Play::default()
         }
+    }
+
+    #[test]
+    fn named_contexts_say_where_the_play_started() {
+        let mut p = play();
+        p.context_name = Some("Mr. Morale & The Big Steppers".into());
+        assert_eq!(
+            context_line(&p).0,
+            "Played from the album “Mr. Morale & The Big Steppers”"
+        );
+        assert_eq!(context_short(&p), "Mr. Morale & The Big Steppers");
+        p.context_type = Some("artist".into());
+        p.context_name = Some("SZA".into());
+        assert_eq!(context_line(&p).0, "Played from SZA's artist page");
+        // An unresolved name falls back to the kind, in both places.
+        p.context_type = Some("playlist".into());
+        p.context_name = None;
+        assert_eq!(context_line(&p).0, "Played from a playlist");
+        assert_eq!(context_short(&p), "A playlist");
+        p.context_type = None;
+        assert_eq!(context_short(&p), "");
+    }
+
+    #[test]
+    fn play_numbers_read_as_ordinals() {
+        let mut p = play();
+        assert_eq!(play_number(&p), None);
+        p.play_number = Some(37);
+        p.first_play = Some(false);
+        assert_eq!(play_number(&p).as_deref(), Some("37th play"));
+        p.play_number = Some(1);
+        p.first_play = Some(true);
+        assert_eq!(play_number(&p).as_deref(), Some("First play ever"));
     }
 
     #[test]

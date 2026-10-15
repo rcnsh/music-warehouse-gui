@@ -9,6 +9,8 @@
 //!   action <namespace::Name>   dispatch a registered action, e.g. `mwgui::ShowOverview`
 //!   artist <id>                dispatch `OpenArtist` (an id or a `name:` placeholder)
 //!   track <id>                 dispatch `OpenTrack`
+//!   plays-artist <id> [<name>] dispatch `ShowPlaysOfArtist`: History narrowed to the artist
+//!   plays-track <id> [<name>]  dispatch `ShowPlaysOfTrack`: History narrowed to the song
 //!   scroll <dy> [<x> <y>]      scroll by `dy` pixels (positive is down) at a point
 //!                              in the window, by default its centre
 //!   click <x> <y>              left-click at a point in the window, in points
@@ -25,6 +27,9 @@
 //! whether or not the window can take real mouse input. Without that, a window behind others keeps its last frame: captures come
 //! out stale, and actions go to whatever had focus in that frame rather than
 //! to the page now showing.
+//!
+//! With `MWGUI_EXPORT_FILE` set, Export CSV (`action mwgui::ExportCsv`)
+//! writes there instead of asking with a save panel a script cannot answer.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -34,7 +39,12 @@ use gpui::{
     PlatformInput, ScrollDelta, ScrollWheelEvent, TouchPhase, point, px,
 };
 
-use crate::actions::{OpenArtist, OpenTrack};
+use crate::actions::{OpenArtist, OpenTrack, ShowPlaysOfArtist, ShowPlaysOfTrack};
+
+/// Where Export CSV writes in a scripted run, skipping the save panel.
+pub fn export_path() -> Option<PathBuf> {
+    std::env::var_os("MWGUI_EXPORT_FILE").map(PathBuf::from)
+}
 
 pub fn install(cx: &mut App) {
     let Some(dir) = std::env::var_os("MWGUI_CAPTURE_DIR").map(PathBuf::from) else {
@@ -106,6 +116,15 @@ fn handle(line: &str, dir: &Path, cx: &mut App) -> Result<(), String> {
         // These carry an id, so they cannot be built by name.
         "artist" => dispatch(window, Box::new(OpenArtist::new(arg.to_owned())), cx),
         "track" => dispatch(window, Box::new(OpenTrack::new(arg.to_owned())), cx),
+        "plays-artist" | "plays-track" => {
+            let (id, name) = arg.split_once(' ').unwrap_or((arg, ""));
+            let action: Box<dyn Action> = if command == "plays-artist" {
+                Box::new(ShowPlaysOfArtist::new(id.to_owned(), name.to_owned()))
+            } else {
+                Box::new(ShowPlaysOfTrack::new(id.to_owned(), name.to_owned()))
+            };
+            dispatch(window, action, cx)
+        }
         "scroll" => scroll(window, arg, cx),
         "click" => click(window, arg, cx),
         other => Err(format!("unknown command {other}")),

@@ -14,7 +14,7 @@ use gpui_component::{
 use gpui_kit_assets::IconName;
 use url::Url;
 
-use crate::api::{self, ApiClient, ApiError, Secret};
+use crate::api::{self, ApiClient, ApiError, PlayFilter, Secret};
 use crate::config::{self, Config};
 use crate::dates;
 use crate::runtime;
@@ -174,7 +174,10 @@ impl SetupView {
                 if client.token_is_admin().await? {
                     return Ok(None);
                 }
-                client.plays(1, None, None, None).await.map(Some)
+                client
+                    .plays(1, None, None, &PlayFilter::default())
+                    .await
+                    .map(Some)
             })
             .await;
             this.update(cx, |this, cx| {

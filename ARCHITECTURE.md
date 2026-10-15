@@ -43,11 +43,12 @@ config.json + Keychain ──> AppRoot ──> SetupView      (no config or toke
 | `src/runtime.rs` | Tokio runtime bridge for reqwest |
 | `src/actions.rs` | Actions, keybindings, menus |
 | `src/appearance.rs` | Light, dark or Match System |
-| `src/state/history.rs` | `HistoryStore`: pages of 200 with `before`, new plays with `after`, jump-to-date anchor |
+| `src/state/history.rs` | `HistoryStore`: pages of 200 with `before`, new plays with `after`, jump-to-date anchor; a search and a song or artist `Scope` page a second, filtered list from the Worker |
+| `src/state/export.rs` | `CsvExport`: streams `/api/plays.csv` for History's current filters into a `.part` file, renamed when complete |
 | `src/state/overview.rs` | `OverviewStore`: daily counts and top artists for one range, Spotify top lists separately |
 | `src/state/now_playing.rs` | `NowPlayingStore`: 20 s / 30 s polling, exponential backoff, `Retry-After` capped at an hour |
 | `src/state/<page>.rs` | One store per page (artist, track, albums, wrapped, on_repeat, on_this_day, rhythm, top_over_time, eras, concerts) |
-| `src/state/mod.rs` | `Remote<T>`: keeps last good data through a failed refresh; `fetch` runs a request into one |
+| `src/state/mod.rs` | `Remote<T>`: keeps last good data through a failed refresh; `fetch` runs a request into one; `RecentDays` for the Artist and Track daily charts |
 | `src/views/nav.rs` | Pages (`Section`, `Page`), sidebar groups, labels, icons, shortcuts, Back stack |
 | `src/views/` | One file per view; `widgets.rs` has shared states and page building blocks |
 | `src/dev_capture.rs` | `dev-capture` feature only: render the window to PNG, dispatch actions, scroll and click on request |
@@ -56,8 +57,9 @@ config.json + Keychain ──> AppRoot ──> SetupView      (no config or toke
 
 ## External services
 
-- **music-warehouse Worker**: `/api/plays`, `/api/daily`, `/api/top-artists`
-  (stored rows) and `/api/now-playing`, `/api/top` (live Spotify proxies).
+- **music-warehouse Worker**: `/api/plays` (with `q`, `track_id`,
+  `artist_id`), `/api/plays.csv`, `/api/daily`, `/api/top-artists` and the
+  page routes (stored rows) and `/api/now-playing`, `/api/top` (live Spotify proxies).
   Bearer read token only. `/auth/login` (in the browser) and `/auth/token`
   for signing in.
 - **Spotify image CDN**: album art and artist photos, fetched by GPUI's
@@ -67,8 +69,12 @@ config.json + Keychain ──> AppRoot ──> SetupView      (no config or toke
 ## Decisions
 
 - **Thin client.** No client-side aggregation. Daily counts, artist counts
-  and rankings come from the Worker. The History filter only searches loaded
-  rows, and paging pauses while it is active.
+  and rankings come from the Worker. History's search and its one-song or
+  one-artist scope are sent to `/api/plays` as filters, the Worker echoes
+  them, and a Worker that does not echo one is reported as too old rather
+  than showing unfiltered rows. CSV export uses the Worker's
+  `/api/plays.csv` with the same filters and streams it to disk instead of
+  paging rows into memory.
 - **Read-only by construction.** The client has no method for `/health`,
   `/login` or `/admin/*`. Sign-in only ever gets a read token from the
   Worker, and `signin.rs` refuses a response with any other access. Setup sends one request to a non-existent admin path:
