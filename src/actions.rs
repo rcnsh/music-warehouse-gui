@@ -26,6 +26,7 @@ actions!(
         OpenSettings,
         OpenInSpotify,
         CopyPlay,
+        ExportCsv,
         Quit
     ]
 );
@@ -50,7 +51,13 @@ impl OpenArtist {
     }
 
     pub fn by_name(name: &str) -> Self {
-        Self::new(crate::models::artist_key(None, name))
+        Self::by_id_or_name(None, name)
+    }
+
+    /// By id when the source sent one (newer Workers do for most stats),
+    /// else by name.
+    pub fn by_id_or_name(id: Option<&str>, name: &str) -> Self {
+        Self::new(crate::models::artist_key(id, name))
     }
 }
 
@@ -65,6 +72,42 @@ pub struct OpenTrack {
 impl OpenTrack {
     pub fn new(id: impl Into<SharedString>) -> Self {
         Self { id: id.into() }
+    }
+}
+
+/// Opens History narrowed to every play of a song (all its editions), from
+/// any view. `name` is what the History chip shows.
+#[derive(Clone, Debug, PartialEq, Eq, Action)]
+#[action(namespace = mwgui, no_json)]
+pub struct ShowPlaysOfTrack {
+    pub id: SharedString,
+    pub name: SharedString,
+}
+
+impl ShowPlaysOfTrack {
+    pub fn new(id: impl Into<SharedString>, name: impl Into<SharedString>) -> Self {
+        Self {
+            id: id.into(),
+            name: name.into(),
+        }
+    }
+}
+
+/// Opens History narrowed to every play crediting an artist first. `id` is
+/// a Spotify id or a `name:` placeholder, as [`OpenArtist`] carries.
+#[derive(Clone, Debug, PartialEq, Eq, Action)]
+#[action(namespace = mwgui, no_json)]
+pub struct ShowPlaysOfArtist {
+    pub id: SharedString,
+    pub name: SharedString,
+}
+
+impl ShowPlaysOfArtist {
+    pub fn new(id: impl Into<SharedString>, name: impl Into<SharedString>) -> Self {
+        Self {
+            id: id.into(),
+            name: name.into(),
+        }
     }
 }
 
@@ -91,6 +134,7 @@ pub fn bind(cx: &mut App) {
         KeyBinding::new("cmd-f", FocusFilter, None),
         KeyBinding::new("cmd-g", GoToDate, None),
         KeyBinding::new("cmd-k", OpenCommandPalette, None),
+        KeyBinding::new("cmd-shift-e", ExportCsv, None),
         KeyBinding::new("cmd-,", OpenSettings, None),
         KeyBinding::new("cmd-q", Quit, None),
         KeyBinding::new("j", gpui_base::actions::SelectDown, Some(TABLE_CONTEXT)),
@@ -110,6 +154,7 @@ pub fn bind(cx: &mut App) {
             MenuItem::separator(),
             MenuItem::action("Quit", Quit),
         ]),
+        Menu::new("File").items([MenuItem::action("Export History as CSV…", ExportCsv)]),
         Menu::new("View").items([
             MenuItem::action("Command Palette…", OpenCommandPalette),
             MenuItem::separator(),

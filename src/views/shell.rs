@@ -15,12 +15,14 @@ use gpui_component::{
 use gpui_kit_assets::IconName;
 
 use crate::actions::{
-    FocusFilter, GoBack, GoToDate, OpenArtist, OpenCommandPalette, OpenSettings, OpenTrack,
-    Refresh, ShowAlbums, ShowConcerts, ShowEras, ShowHistory, ShowOnRepeat, ShowOnThisDay,
-    ShowOverview, ShowRhythm, ShowTopOverTime, ShowWrapped,
+    ExportCsv, FocusFilter, GoBack, GoToDate, OpenArtist, OpenCommandPalette, OpenSettings,
+    OpenTrack, Refresh, ShowAlbums, ShowConcerts, ShowEras, ShowHistory, ShowOnRepeat,
+    ShowOnThisDay, ShowOverview, ShowPlaysOfArtist, ShowPlaysOfTrack, ShowRhythm, ShowTopOverTime,
+    ShowWrapped,
 };
 use crate::api::ApiClient;
 use crate::appearance;
+use crate::state::history::Scope;
 use crate::state::now_playing::NowPlayingStore;
 use crate::ui_state;
 use crate::views::albums::AlbumsView;
@@ -276,6 +278,22 @@ impl Shell {
             .update(cx, |h, cx| h.focus_jump(window, cx));
     }
 
+    /// History narrowed to one song's or artist's plays.
+    fn show_plays(&mut self, scope: Scope, window: &mut Window, cx: &mut Context<Self>) {
+        self.pages
+            .history
+            .update(cx, |h, cx| h.show_scope(scope, window, cx));
+        self.navigate(Section::History.into(), window, cx);
+    }
+
+    /// Exports what History shows, so the file matches the list on screen.
+    fn on_export_csv(&mut self, _: &ExportCsv, window: &mut Window, cx: &mut Context<Self>) {
+        self.navigate(Section::History.into(), window, cx);
+        self.pages
+            .history
+            .update(cx, |h, cx| h.export_csv(window, cx));
+    }
+
     fn on_open_palette(
         &mut self,
         _: &OpenCommandPalette,
@@ -309,6 +327,7 @@ impl Shell {
                 self.navigate(Section::Overview.into(), window, cx);
             }
             PaletteCommand::Refresh => self.on_refresh(&Refresh, window, cx),
+            PaletteCommand::ExportCsv => self.on_export_csv(&ExportCsv, window, cx),
             PaletteCommand::Settings => cx.emit(ShellEvent::OpenSettings),
             PaletteCommand::Appearance(choice) => appearance::set(choice, cx),
         }
@@ -495,6 +514,21 @@ impl Render for Shell {
             .on_action(cx.listener(|this, a: &OpenTrack, w, cx| {
                 this.navigate(Page::Track(a.id.clone()), w, cx)
             }))
+            .on_action(cx.listener(|this, a: &ShowPlaysOfTrack, w, cx| {
+                let scope = Scope::Song {
+                    id: a.id.clone(),
+                    name: a.name.clone(),
+                };
+                this.show_plays(scope, w, cx)
+            }))
+            .on_action(cx.listener(|this, a: &ShowPlaysOfArtist, w, cx| {
+                let scope = Scope::Artist {
+                    id: a.id.clone(),
+                    name: a.name.clone(),
+                };
+                this.show_plays(scope, w, cx)
+            }))
+            .on_action(cx.listener(Self::on_export_csv))
             .on_action(cx.listener(Self::go_back))
             .on_action(cx.listener(Self::on_focus_filter))
             .on_action(cx.listener(Self::on_go_to_date))
