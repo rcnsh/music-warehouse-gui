@@ -11,10 +11,6 @@
 //! behind or ahead (a renamed key, a new field) still decodes and only the
 //! missing figure goes blank.
 
-// The shapes are complete so a page can show another figure without editing
-// this shared file; until it does, that field is never read.
-#![allow(dead_code)]
-
 use std::collections::BTreeMap;
 
 use serde::Deserialize;

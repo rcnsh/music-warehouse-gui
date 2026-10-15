@@ -85,6 +85,9 @@ pub struct Shell {
     now_playing_store: Entity<NowPlayingStore>,
     now_playing: Entity<NowPlayingStrip>,
     worker_host: String,
+    /// For the ⌘K palette's artist and song search, which lives in a dialog
+    /// outside every page.
+    client: ApiClient,
     focus: FocusHandle,
     /// Dropped while the window is hidden, which stops the loop.
     live_history: Option<Task<()>>,
@@ -110,7 +113,7 @@ impl Shell {
             artist: cx.new(|cx| ArtistView::new(client.clone(), window, cx)),
             track: cx.new(|cx| TrackView::new(client.clone(), window, cx)),
         };
-        let now_playing_store = cx.new(|cx| NowPlayingStore::new(client, cx));
+        let now_playing_store = cx.new(|cx| NowPlayingStore::new(client.clone(), cx));
         let now_playing = cx.new(|cx| NowPlayingStrip::new(now_playing_store.clone(), cx));
 
         // Polling stops while the window is minimized, on another Space or
@@ -139,6 +142,7 @@ impl Shell {
             now_playing_store,
             now_playing,
             worker_host,
+            client,
             focus: cx.focus_handle(),
             live_history: None,
             _subscriptions: subscriptions,
@@ -278,7 +282,7 @@ impl Shell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        palette::open(cx.entity().downgrade(), window, cx);
+        palette::open(cx.entity().downgrade(), self.client.clone(), window, cx);
     }
 
     pub fn run_command(

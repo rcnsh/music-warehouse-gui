@@ -11,7 +11,7 @@ use gpui::{
     px,
 };
 use gpui_component::{
-    ActiveTheme, Icon, Selectable, Sizable, StyledExt,
+    ActiveTheme, Selectable, Sizable, StyledExt,
     button::{Button, ButtonVariants},
     h_flex,
     tag::Tag,
@@ -134,11 +134,8 @@ impl Render for ConcertsView {
             .data
             .as_ref()
             .and_then(|data| self.selected_region(data));
-        // The loading and error panels fill their parent, so they need a
-        // height; loaded content sizes itself and scrolls with the page.
-        let waiting = store.concerts.data.is_none();
         let now = Utc::now();
-        let body = widgets::remote_view(
+        let body = widgets::page_body(
             "concerts-retry",
             &store.concerts,
             "Loading concerts…",
@@ -154,7 +151,7 @@ impl Render for ConcertsView {
                 controls,
                 cx,
             ))
-            .child(div().when(waiting, |this| this.h(px(320.))).child(body))
+            .child(body)
     }
 }
 
@@ -226,22 +223,13 @@ fn render_concerts(
 }
 
 fn empty(icon: IconName, title: &str, detail: &'static str, cx: &App) -> AnyElement {
-    div()
-        .h(px(320.))
-        .child(widgets::state_panel(
-            Some(Icon::new(icon)),
-            title.to_owned(),
-            Some(detail.into()),
-            None,
-            cx,
-        ))
-        .into_any_element()
+    widgets::page_state(Some(icon), title.to_owned(), Some(detail.into()), cx)
 }
 
 fn render_show(region: &str, index: usize, show: &Concert, cx: &App) -> AnyElement {
     let muted = cx.theme().muted_foreground;
     let id = format!("concert-{region}-{index}");
-    let names = artist_names(&show.artists);
+    let names = widgets::artist_names(&show.artists);
     let mut artists = h_flex().flex_wrap().font_semibold();
     for (j, name) in names.iter().enumerate() {
         if j > 0 {
@@ -379,15 +367,6 @@ fn group_by_region<'a>(
         .collect()
 }
 
-/// The Worker joins a bill's matched artists with ", ".
-fn artist_names(artists: &str) -> Vec<&str> {
-    artists
-        .split(", ")
-        .map(str::trim)
-        .filter(|name| !name.is_empty())
-        .collect()
-}
-
 /// A tag for anything other than a normal on-sale event.
 fn status_label(status: Option<&str>) -> Option<String> {
     let status = status?.trim().to_ascii_lowercase();
@@ -454,16 +433,6 @@ mod tests {
             .map(|(k, s)| (*k, s.len()))
             .collect();
         assert_eq!(keys, [("berlin", 0), ("pt", 1), ("old", 1)]);
-    }
-
-    #[test]
-    fn bills_split_into_artists() {
-        assert_eq!(
-            artist_names("Maroon 5, Kanye West"),
-            ["Maroon 5", "Kanye West"]
-        );
-        assert_eq!(artist_names("Kendrick Lamar"), ["Kendrick Lamar"]);
-        assert!(artist_names("").is_empty());
     }
 
     #[test]

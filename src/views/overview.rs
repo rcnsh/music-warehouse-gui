@@ -27,10 +27,9 @@ use gpui_kit_assets::IconName;
 use crate::actions::{OpenArtist, OpenTrack};
 use crate::api::{ApiClient, ApiError, TopRange};
 use crate::dates::{self, RangePreset};
-use crate::models::{DayCount, ImageRef, join_names, pick_image};
+use crate::models::{DayCount, join_names};
 use crate::state::overview::OverviewStore;
 use crate::ui_state::{self, SavedRange};
-use crate::views::history::group;
 use crate::views::widgets;
 
 pub struct ArtistsTable {
@@ -98,7 +97,7 @@ impl TableDelegate for ArtistsTable {
                         div()
                             .w(px(48.))
                             .text_right()
-                            .child(group(artist.plays as usize)),
+                            .child(widgets::count(artist.plays.into())),
                     )
                     .child(
                         div()
@@ -154,7 +153,7 @@ impl TableDelegate for ArtistsTable {
 /// the bar the chart's hover is highlighting. BarChart has no click callback.
 const BAR_PADDING_INNER: f32 = 0.4;
 const BAR_PADDING_OUTER: f32 = 0.2;
-const BAR_MAX_WIDTH: f32 = 30.;
+const BAR_MAX_WIDTH: f32 = widgets::CHART_BAR_MAX_WIDTH;
 
 /// The day a click lands on, given its distance from the chart's left edge.
 /// Mirrors BarChart's own hover hit-test, which only lines up because the
@@ -504,9 +503,19 @@ impl OverviewView {
             (None, None) => widgets::loading_panel("Asking Spotify…", cx).into_any_element(),
             (Some(response), None) => {
                 // Lines are 32px tall at 2x, so 64px renditions stay sharp.
+                // Spotify ids open the same Artist and Track pages as the
+                // warehouse's own rankings.
                 let artists = response.artists.items.iter().enumerate().map(|(ix, a)| {
-                    let art = widgets::artwork(image_url(&a.images), px(32.), true, cx);
-                    ranked_line(ix, art, a.name.clone().unwrap_or_default(), None, muted)
+                    let row = widgets::RankedRow::new(
+                        ("spotify-artist", ix),
+                        a.name.clone().unwrap_or_default(),
+                    )
+                    .rank(ix + 1)
+                    .art(widgets::spotify_art(&a.images, px(32.), true, cx));
+                    match &a.id {
+                        Some(id) => row.on_click_action(OpenArtist::new(id.clone())),
+                        None => row,
+                    }
                 });
                 let tracks = response.tracks.items.iter().enumerate().map(|(ix, t)| {
                     let images = t
@@ -514,14 +523,17 @@ impl OverviewView {
                         .as_ref()
                         .map(|a| a.images.as_slice())
                         .unwrap_or_default();
-                    let art = widgets::artwork(image_url(images), px(32.), false, cx);
-                    ranked_line(
-                        ix,
-                        art,
+                    let row = widgets::RankedRow::new(
+                        ("spotify-track", ix),
                         t.name.clone().unwrap_or_default(),
-                        Some(join_names(&t.artists)),
-                        muted,
                     )
+                    .rank(ix + 1)
+                    .art(widgets::spotify_art(images, px(32.), false, cx))
+                    .subtitle(join_names(&t.artists));
+                    match &t.id {
+                        Some(id) => row.on_click_action(OpenTrack::new(id.clone())),
+                        None => row,
+                    }
                 });
                 v_flex()
                     .gap_3()
@@ -585,40 +597,6 @@ fn section_label(text: &'static str, cx: &App) -> impl IntoElement {
         .font_semibold()
         .text_color(cx.theme().muted_foreground)
         .child(text)
-}
-
-fn image_url(images: &[ImageRef]) -> Option<SharedString> {
-    pick_image(images, 64).map(|url| SharedString::from(url.to_owned()))
-}
-
-fn ranked_line(
-    ix: usize,
-    art: AnyElement,
-    title: String,
-    subtitle: Option<String>,
-    muted: gpui::Hsla,
-) -> impl IntoElement {
-    h_flex()
-        .gap_2()
-        .items_center()
-        .text_sm()
-        .child(
-            div()
-                .w(px(20.))
-                .text_right()
-                .text_color(muted)
-                .child((ix + 1).to_string()),
-        )
-        .child(art)
-        .child(
-            v_flex()
-                .flex_1()
-                .min_w_0()
-                .child(div().truncate().child(title))
-                .when_some(subtitle, |this, subtitle| {
-                    this.child(div().truncate().text_xs().text_color(muted).child(subtitle))
-                }),
-        )
 }
 
 impl EventEmitter<OverviewEvent> for OverviewView {}

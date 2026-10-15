@@ -50,7 +50,7 @@ config.json + Keychain ──> AppRoot ──> SetupView      (no config or toke
 | `src/state/mod.rs` | `Remote<T>`: keeps last good data through a failed refresh; `fetch` runs a request into one |
 | `src/views/nav.rs` | Pages (`Section`, `Page`), sidebar groups, labels, icons, shortcuts, Back stack |
 | `src/views/` | One file per view; `widgets.rs` has shared states and page building blocks |
-| `src/dev_capture.rs` | `dev-capture` feature only: render window to PNG on request |
+| `src/dev_capture.rs` | `dev-capture` feature only: render the window to PNG, dispatch actions, scroll and click on request |
 | `tests/fixtures/` | Captured and hand-written API responses used by unit tests (see `NOTES.md`) |
 | `scripts/bundle-macos.sh` | Builds, ad-hoc signs and zips `Music Warehouse.app` |
 

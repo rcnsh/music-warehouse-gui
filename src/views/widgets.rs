@@ -2,9 +2,7 @@
 //! failure reads the same wherever it surfaces, and the building blocks
 //! pages are made of (tiles, headings, ranked rows, charts, art, formatting).
 
-// A shared toolkit: a widget stays here even while no page uses it yet.
-#![allow(dead_code)]
-
+use chrono::{DateTime, Local, NaiveDate, TimeZone};
 use gpui::{
     Action, AnyElement, App, ClickEvent, ElementId, InteractiveElement, IntoElement, ObjectFit,
     ParentElement, Pixels, RenderOnce, SharedString, StatefulInteractiveElement, Styled,
@@ -357,8 +355,14 @@ pub struct RankedRow {
     subtitle: Option<SharedString>,
     value: Option<SharedString>,
     share: Option<f32>,
+    value_width: Pixels,
     action: Option<Box<dyn Action>>,
 }
+
+/// The value column's default width, enough for `12 h 34 min` or `12,345`.
+/// Fixed rather than fitted, so the bars of rows with longer and shorter
+/// values still line up.
+pub const RANKED_VALUE_WIDTH: Pixels = px(84.);
 
 impl RankedRow {
     pub fn new(id: impl Into<ElementId>, title: impl Into<SharedString>) -> Self {
@@ -370,6 +374,7 @@ impl RankedRow {
             subtitle: None,
             value: None,
             share: None,
+            value_width: RANKED_VALUE_WIDTH,
             action: None,
         }
     }
@@ -394,6 +399,14 @@ impl RankedRow {
     /// The count on the right, already formatted ([`count`], [`minutes`]).
     pub fn value(mut self, value: impl Into<SharedString>) -> Self {
         self.value = Some(value.into());
+        self
+    }
+
+    /// Width of the value column, for lists whose values are much shorter
+    /// (`7%`) or longer than [`RANKED_VALUE_WIDTH`] allows. Use the same width
+    /// for every row of a list.
+    pub fn value_width(mut self, width: Pixels) -> Self {
+        self.value_width = width;
         self
     }
 
@@ -453,9 +466,10 @@ impl RenderOnce for RankedRow {
             .when_some(self.value, |this, value| {
                 this.child(
                     div()
-                        .min_w(px(56.))
+                        .w(self.value_width)
                         .flex_shrink_0()
                         .text_right()
+                        .truncate()
                         .child(value),
                 )
             })
@@ -501,10 +515,18 @@ pub fn link(
         .child(label.into())
 }
 
+/// The widest a chart bar gets, so a short series across a wide card (one
+/// month of plays, seven weekdays) keeps slim bars like Overview's.
+pub const CHART_BAR_MAX_WIDTH: f32 = 30.;
+
 /// A labelled bar chart over a series (months, hours, quarters), styled like
 /// Overview's daily chart. Labels must be distinct; `name` is what the
 /// tooltip calls the value ("Plays", "Minutes"). Give it a fixed-height
 /// parent, e.g. `div().h(px(220.)).child(...)`.
+///
+/// Unlike Overview's, the value labels sit in a gutter left of the bars
+/// rather than over them: nothing here hit-tests clicks, so the gutter costs
+/// nothing, and inside the plot they cover the first bars.
 pub fn bar_chart(
     id: impl Into<ElementId>,
     points: Vec<(SharedString, f64)>,
@@ -520,10 +542,19 @@ pub fn bar_chart(
         .fill(move |_, _, _, _| accent)
         .value_axis(true)
         .value_tick_count(4)
-        .value_tick_format(|v| format!("{v:.0}"))
+        // The zero line needs no label, and in the gutter it would touch
+        // the first band label below it.
+        .value_tick_format(|v| {
+            if v == 0. {
+                String::new()
+            } else {
+                format!("{v:.0}")
+            }
+        })
         .band_tick_count(bands.clamp(1, 8))
         .grid_dashed(false)
-        .value_axis_label_placement(AxisLabelPlacement::Inside)
+        .value_axis_label_placement(AxisLabelPlacement::Outside)
+        .max_band_width(px(CHART_BAR_MAX_WIDTH))
         .id(id)
 }
 
@@ -567,9 +598,11 @@ pub fn spotify_art(images: &[ImageRef], size: Pixels, round: bool, cx: &App) -> 
     artwork(url, size, round, cx)
 }
 
-/// Renders a [`Remote`]'s three states the same way everywhere: a spinner
-/// before the first answer, the error panel if that failed, else `content`
-/// with a retry banner above it when a later refresh failed.
+/// Renders a [`Remote`]'s three states in a pane of fixed size (Overview's
+/// panels): a spinner before the first answer, the error panel if that
+/// failed, else `content` with a retry banner above it when a later refresh
+/// failed. Everything stretches to fill the pane; inside a scrolling [`page`]
+/// use [`page_body`] instead.
 pub fn remote_view<T>(
     id: impl Into<ElementId>,
     remote: &Remote<T>,
@@ -591,24 +624,83 @@ pub fn remote_view<T>(
     }
 }
 
-/// What an unfinished page shows until its own PR lands.
-pub fn coming_soon(
+/// How tall a loading, error or empty panel is inside a scrolling [`page`],
+/// which has no height of its own for the panel to centre in.
+pub const PAGE_PANEL_HEIGHT: Pixels = px(320.);
+
+/// [`remote_view`] for a scrolling [`page`]: the loading and error panels get
+/// [`PAGE_PANEL_HEIGHT`] to centre in, and loaded content keeps its natural
+/// height (under a retry banner when a refresh failed) rather than being
+/// squeezed to fit the window.
+pub fn page_body<T>(
+    id: impl Into<ElementId>,
+    remote: &Remote<T>,
+    loading_label: impl Into<SharedString>,
+    on_retry: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    cx: &App,
+    content: impl FnOnce(&T) -> AnyElement,
+) -> AnyElement {
+    match (&remote.data, &remote.error) {
+        (Some(data), error) => v_flex()
+            .gap_3()
+            .when_some(error.as_ref(), |this, error| {
+                this.child(error_banner(id, error, on_retry, cx))
+            })
+            .child(content(data))
+            .into_any_element(),
+        (None, Some(error)) => div()
+            .h(PAGE_PANEL_HEIGHT)
+            .child(error_panel(id, error, on_retry, cx))
+            .into_any_element(),
+        (None, None) => div()
+            .h(PAGE_PANEL_HEIGHT)
+            .child(loading_panel(loading_label, cx))
+            .into_any_element(),
+    }
+}
+
+/// An empty or explanatory [`state_panel`] inside a scrolling [`page`], at
+/// [`PAGE_PANEL_HEIGHT`].
+pub fn page_state(
+    icon: Option<IconName>,
     title: impl Into<SharedString>,
     detail: Option<SharedString>,
     cx: &App,
-) -> impl IntoElement {
-    state_panel(
-        Some(Icon::new(IconName::Construction)),
-        title,
-        detail,
-        None,
-        cx,
-    )
+) -> AnyElement {
+    div()
+        .h(PAGE_PANEL_HEIGHT)
+        .child(state_panel(icon.map(Icon::new), title, detail, None, cx))
+        .into_any_element()
+}
+
+/// A muted line of small text: a note under a heading, or what stands in for
+/// an empty list inside a card.
+pub fn note(text: impl Into<SharedString>, cx: &App) -> impl IntoElement {
+    div()
+        .text_sm()
+        .text_color(cx.theme().muted_foreground)
+        .child(text.into())
 }
 
 /// `12,345`.
 pub fn count(n: u64) -> String {
-    crate::views::history::group(n as usize)
+    let digits = n.to_string();
+    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
+    for (i, ch) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(ch);
+    }
+    out
+}
+
+/// `1 play`, `1,204 plays`.
+pub fn plural(n: u64, unit: &str) -> String {
+    match n {
+        1 => format!("1 {unit}"),
+        n => format!("{} {unit}s", count(n)),
+    }
 }
 
 /// Listening time for a figure in minutes: `45 min`, `12 h 5 min`, `1,204 h`.
@@ -637,9 +729,84 @@ pub fn percent(share: f64) -> String {
 
 /// `2026-07` → `Jul 2026`; anything else unchanged.
 pub fn month_label(month: &str) -> String {
-    chrono::NaiveDate::parse_from_str(&format!("{month}-01"), "%Y-%m-%d")
+    NaiveDate::parse_from_str(&format!("{month}-01"), "%Y-%m-%d")
         .map(|d| d.format("%b %Y").to_string())
         .unwrap_or_else(|_| month.to_owned())
+}
+
+/// A span of `YYYY-MM` months: `Feb 2024 – Jun 2024`, `Feb 2024` when it is
+/// one month (or the end is blank), `Sep 2026 – now` when `to` is `None`
+/// because it is still running.
+pub fn month_span(from: &str, to: Option<&str>) -> String {
+    match to {
+        None => format!("{} – now", month_label(from)),
+        Some(to) if to == from || to.is_empty() => month_label(from),
+        Some(to) => format!("{} – {}", month_label(from), month_label(to)),
+    }
+}
+
+/// `16 Jul 2017`: how every page writes a calendar day.
+pub fn day(date: NaiveDate) -> String {
+    date.format("%-d %b %Y").to_string()
+}
+
+/// A `YYYY-MM-DD` day from the Worker as [`day`] writes it; anything else
+/// unchanged.
+pub fn day_label(text: &str) -> String {
+    NaiveDate::parse_from_str(text, "%Y-%m-%d")
+        .map(day)
+        .unwrap_or_else(|_| text.to_owned())
+}
+
+/// The local calendar day of an ISO 8601 instant (a stat's `as_of`, a first
+/// play).
+pub fn local_date(iso: &str) -> Option<NaiveDate> {
+    instant_in(iso, &Local).map(|at| at.date_naive())
+}
+
+/// An ISO 8601 instant as a local day, `12 Oct 2026`.
+pub fn local_day(iso: &str) -> Option<String> {
+    local_date(iso).map(day)
+}
+
+/// An ISO 8601 instant as a local day and time: `("16 Jul 2017", "16:32")`.
+pub fn local_day_time(iso: &str) -> Option<(String, String)> {
+    day_time_in(iso, &Local)
+}
+
+fn instant_in<Tz: TimeZone>(iso: &str, tz: &Tz) -> Option<DateTime<Tz>> {
+    DateTime::parse_from_rfc3339(iso)
+        .ok()
+        .map(|at| at.with_timezone(tz))
+}
+
+fn day_time_in<Tz: TimeZone>(iso: &str, tz: &Tz) -> Option<(String, String)>
+where
+    Tz::Offset: std::fmt::Display,
+{
+    let at = instant_in(iso, tz)?;
+    Some((day(at.date_naive()), at.format("%H:%M").to_string()))
+}
+
+/// The credited artists of a play or a concert bill, which the Worker joins
+/// as "A, B" without ids. A name that itself contains ", " is split too.
+pub fn artist_names(artists: &str) -> Vec<&str> {
+    artists
+        .split(", ")
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .collect()
+}
+
+pub const WEEKDAYS: [&str; 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+/// Chart points for a value per hour of the day, labelled `00`–`23`.
+pub fn hour_points(values: impl IntoIterator<Item = f64>) -> Vec<(SharedString, f64)> {
+    values
+        .into_iter()
+        .enumerate()
+        .map(|(hour, v)| (format!("{hour:02}").into(), v))
+        .collect()
 }
 
 #[cfg(test)]
@@ -659,6 +826,56 @@ mod tests {
         assert_eq!(percent(0.), "0.0%");
         assert_eq!(month_label("2026-07"), "Jul 2026");
         assert_eq!(month_label("2026-Q3"), "2026-Q3");
+        assert_eq!(plural(1, "day"), "1 day");
+        assert_eq!(plural(1204, "play"), "1,204 plays");
+        assert_eq!(count(0), "0");
+        assert_eq!(count(999), "999");
+        assert_eq!(count(1000), "1,000");
+    }
+
+    #[test]
+    fn spans_and_days_read_naturally() {
+        assert_eq!(
+            month_span("2024-02", Some("2024-06")),
+            "Feb 2024 – Jun 2024"
+        );
+        assert_eq!(month_span("2024-02", Some("2024-02")), "Feb 2024");
+        assert_eq!(month_span("2024-02", Some("")), "Feb 2024");
+        assert_eq!(month_span("2026-09", None), "Sep 2026 – now");
+        assert_eq!(day_label("2025-08-04"), "4 Aug 2025");
+        assert_eq!(day_label("soon"), "soon");
+    }
+
+    #[test]
+    fn instants_read_in_the_local_zone() {
+        use chrono::{FixedOffset, Utc};
+        let singapore = FixedOffset::east_opt(8 * 3600).unwrap();
+        assert_eq!(
+            day_time_in("2017-07-16T16:32:15.000Z", &singapore),
+            Some(("17 Jul 2017".into(), "00:32".into()))
+        );
+        assert_eq!(
+            instant_in("2026-10-11T16:00:00.000Z", &Utc).map(|t| t.date_naive()),
+            NaiveDate::from_ymd_opt(2026, 10, 11)
+        );
+        assert_eq!(day_time_in("not a date", &singapore), None);
+    }
+
+    #[test]
+    fn credits_split_into_names() {
+        assert_eq!(
+            artist_names("Kendrick Lamar, Taylour Paige"),
+            ["Kendrick Lamar", "Taylour Paige"]
+        );
+        assert_eq!(artist_names("SZA"), ["SZA"]);
+        assert!(artist_names("").is_empty());
+    }
+
+    #[test]
+    fn hours_are_labelled() {
+        let points = hour_points([0.5, 2.]);
+        assert_eq!(points[0], ("00".into(), 0.5));
+        assert_eq!(points[1], ("01".into(), 2.));
     }
 
     #[test]

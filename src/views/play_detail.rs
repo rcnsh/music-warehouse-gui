@@ -69,17 +69,6 @@ fn context_url(uri: &str) -> Option<String> {
     }
 }
 
-/// The credited artists, one per link. Stored rows carry the names joined
-/// as "A, B" without ids, so a name that itself contains ", " is split too;
-/// its halves then open artist pages that find nothing.
-pub fn artist_names(artists: &str) -> Vec<&str> {
-    artists
-        .split(", ")
-        .map(str::trim)
-        .filter(|name| !name.is_empty())
-        .collect()
-}
-
 pub fn format_duration(ms: i64) -> String {
     let seconds = (ms.max(0) + 500) / 1000;
     format!("{}:{:02}", seconds / 60, seconds % 60)
@@ -217,7 +206,7 @@ pub fn render(play: &Play, unsaved: bool, actions: DetailActions, cx: &App) -> A
 /// Each artist a separate link, comma-separated as in the table.
 fn artist_links(artists: &str, cx: &App) -> AnyElement {
     let mut row = h_flex().flex_wrap().text_sm();
-    for (ix, name) in artist_names(artists).into_iter().enumerate() {
+    for (ix, name) in widgets::artist_names(artists).into_iter().enumerate() {
         if ix > 0 {
             row = row.child(div().pr_1().child(","));
         }
@@ -280,16 +269,6 @@ mod tests {
         assert_eq!(context_line(&p).0, "Played from search, the queue or radio");
         p.source = Some("export".into());
         assert!(context_line(&p).0.contains("export"));
-    }
-
-    #[test]
-    fn credits_split_into_one_link_per_artist() {
-        assert_eq!(
-            artist_names("Kendrick Lamar, Taylour Paige"),
-            ["Kendrick Lamar", "Taylour Paige"]
-        );
-        assert_eq!(artist_names("SZA"), ["SZA"]);
-        assert!(artist_names("").is_empty());
     }
 
     #[test]

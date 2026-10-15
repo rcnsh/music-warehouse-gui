@@ -266,19 +266,14 @@ where
 /// different buckets.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RangeKey {
-    from: NaiveDate,
-    to: NaiveDate,
+    range: DateRange,
     tz: String,
 }
 
 impl RangeKey {
     pub fn new(range: &DateRange, tz: &str) -> Self {
-        // DateRange exposes its days only as query strings. An unreadable end
-        // counts as far future, so that entry is always treated as open.
-        let day = |s: String| NaiveDate::parse_from_str(&s, "%Y-%m-%d").unwrap_or(NaiveDate::MAX);
         Self {
-            from: day(range.query_from()),
-            to: day(range.query_to()),
+            range: *range,
             tz: tz.to_owned(),
         }
     }
@@ -296,7 +291,7 @@ impl<V> CacheEntry<V> {
     fn is_open(&self) -> bool {
         self.fetched_on
             .pred_opt()
-            .is_none_or(|yesterday| self.key.to >= yesterday)
+            .is_none_or(|yesterday| self.key.range.to() >= yesterday)
     }
 
     /// An open range fetched on an earlier day is missing that day's later

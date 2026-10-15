@@ -18,26 +18,49 @@ displays data; the Worker does the polling, storage and aggregation.
 - **History** (⌘1): every stored play in local time with album art, loaded
   page by page as you scroll. ⌘F searches the whole history by track, artist
   or album, ignoring case and accents, from two characters (needs a Worker
-  with `q` on `/api/plays`). Enter searches at once and moves to the list,
-  j/k move. ⌘G jumps to a date. New plays appear at the top within five
-  minutes of the Worker storing them, while the window is visible. Selecting a
-  play shows its details; `o` opens it in Spotify and ⌘C copies it.
-- **Overview** (⌘2): plays per day and top artists for 7 days, 30 days, a year
-  or a custom range, bucketed by the Worker in the system timezone. Alongside
-  them are Spotify's own live top lists, with artist photos and album art.
-- **Pages** in the sidebar, grouped as Listening (History, Overview, On
-  Repeat ⌘3, On This Day ⌘4), Stats (Top Albums ⌘5, Top Over Time ⌘6,
-  Rhythm ⌘7, Eras ⌘8, Wrapped ⌘9) and Live (Concerts ⌘0), plus Artist and
-  Track pages opened from other pages. ⌘[ goes back. The newer pages are
-  placeholders that load their data while each gets its own PR.
+  with `q` on `/api/plays`); Search from date limits a search to plays since
+  a day, and ⌘G (Go to date) sets the day it searches back from. Enter
+  searches at once and moves to the list, j/k move. New plays appear at the
+  top within five minutes of the Worker storing them, while the window is
+  visible, and plays Spotify reports that the Worker has not stored yet show
+  above them marked "Not saved yet". Selecting a play shows its details; `o`
+  opens it in Spotify, ⌘C copies it, and its song and artists open their
+  pages.
+- **Overview** (⌘2): plays per day, top artists and top songs for 7 days, 30
+  days, a year or a custom range, bucketed by the Worker in the system
+  timezone, beside Spotify's own live top lists with artist photos and album
+  art. Each range is fetched once per session, so switching back is instant;
+  ⌘R fetches it again. Clicking a day opens it in History; artists and songs
+  open their pages.
+- **On Repeat** (⌘3): songs and albums played far more than usual over the
+  last two weeks, with each song's plays per day.
+- **On This Day** (⌘4): the most-played songs on this date in each earlier
+  year, for today or any day you pick.
+- **Top Albums** (⌘5): the most-played albums, all time and per year.
+- **Top Over Time** (⌘6): the leading artists per year or quarter, and how
+  each one's share of listening rose and fell.
+- **Rhythm** (⌘7): listening streaks and when in the day and week you listen,
+  all time or per year, in each era's local time.
+- **Eras** (⌘8): how listening changed between the Worker's two configured
+  eras (a move to another city, say), against how much it usually changes.
+- **Wrapped** (⌘9): a Spotify-Wrapped-style summary of each year or this
+  year so far: totals, top artists, songs and albums, discoveries, when you
+  listened and month by month.
+- **Concerts** (⌘0): upcoming shows for the artists you play most, in the
+  regions the Worker is configured for.
+- **Artist and Track pages**: all-time plays, listening time, first and last
+  play, plays per month and (for artists) their most-played songs. Opened by
+  clicking an artist or song anywhere in the app.
+- **Back** (⌘[ or the arrow in the top bar) returns to the previous page.
 - **Now playing** strip, polled every 20–30 seconds. It backs off on errors and
   pauses while the window is hidden.
-- ⌘K opens a command palette with every command, searchable by name.
-- ⌘R refreshes, ⌘, opens settings. Clicking a day in the Overview chart opens
-  that day in History.
+- **⌘K** opens a command palette with every command, and searches the stored
+  history for artists and songs by name as you type.
+- ⌘R refreshes, ⌘, opens settings.
 
 History and Overview read stored rows, so they keep working when the Worker's
-Spotify grant has expired; only the live strip and top lists say so.
+Spotify grant has expired; only the live strip, Spotify's top lists and
+History's not-yet-saved plays need it.
 
 ## Quickstart
 
@@ -97,13 +120,14 @@ token with admin access, and the client has no method for any admin route.
 Each rebuild of an ad-hoc-signed binary has a new signature, so macOS asks
 again before releasing the Keychain item. "Always Allow" covers one build.
 
-Development builds with `--features dev-capture` also read two environment
+Development builds with `--features dev-capture` also read these environment
 variables:
 
 | Variable | Effect |
 |---|---|
 | `MWGUI_DEV_TOKEN_FILE` | Path to a dotenv file (such as the Worker's `.dev.vars`). Only its `READ_TOKEN=` line is used, instead of the Keychain. |
-| `MWGUI_CAPTURE_DIR` | Directory the app watches for `request` files to save window PNGs or dispatch actions. See `src/dev_capture.rs`. |
+| `MWGUI_CAPTURE_DIR` | Directory the app watches for `request` files to save window PNGs, dispatch actions, scroll and click. See `src/dev_capture.rs`. |
+| `MWGUI_UI_STATE_FILE` | Path to use instead of `ui-state.json`, so scripted runs leave the real window state alone. |
 
 ## Worker
 
@@ -122,7 +146,9 @@ The app talks to these Worker routes, all with
 | `GET /api/stats/{on-repeat,rhythm,top-over-time,eras,albums}` | The Stats pages |
 | `GET /api/wrapped/ranges`, `GET /api/wrapped` | Wrapped |
 | `GET /api/concerts` | Concerts, in whatever regions the Worker is configured for |
-| `GET /api/search`, `GET /api/top-tracks`, `GET /api/recently-played` | In the client, for pages to use |
+| `GET /api/top-tracks` | Overview top songs |
+| `GET /api/recently-played` | History's not-yet-saved plays |
+| `GET /api/search` | ⌘K artist and song search |
 
 Signing in uses the Worker's native-app flow (see its README, "Signing in
 with Spotify"): the app listens on `http://127.0.0.1:<random port>/callback`,

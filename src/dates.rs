@@ -76,12 +76,10 @@ impl DateRange {
         Ok(range)
     }
 
-    #[cfg(test)]
     pub fn from(&self) -> NaiveDate {
         self.from
     }
 
-    #[cfg(test)]
     pub fn to(&self) -> NaiveDate {
         self.to
     }
@@ -91,11 +89,11 @@ impl DateRange {
     }
 
     pub fn query_from(&self) -> String {
-        self.from.format("%Y-%m-%d").to_string()
+        self.from().format("%Y-%m-%d").to_string()
     }
 
     pub fn query_to(&self) -> String {
-        self.to.format("%Y-%m-%d").to_string()
+        self.to().format("%Y-%m-%d").to_string()
     }
 
     pub fn describe(&self) -> String {

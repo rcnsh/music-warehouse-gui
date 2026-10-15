@@ -9,7 +9,7 @@ use gpui::{
     div, prelude::FluentBuilder, px,
 };
 use gpui_component::{
-    ActiveTheme, Icon, h_flex,
+    ActiveTheme, h_flex,
     tab::{Tab, TabBar},
     v_flex,
 };
@@ -19,7 +19,6 @@ use crate::actions::OpenArtist;
 use crate::api::ApiClient;
 use crate::models::{Leader, Period, TopOverTime};
 use crate::state::top_over_time::TopOverTimeStore;
-use crate::views::albums::as_of_label;
 use crate::views::widgets;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -252,14 +251,12 @@ fn content(data: &TopOverTime, grain: Grain, cx: &App) -> AnyElement {
         Grain::Quarters => &data.quarters,
     };
     if periods.is_empty() {
-        return widgets::state_panel(
-            Some(Icon::new(IconName::Inbox)),
+        return widgets::page_state(
+            Some(IconName::Inbox),
             "No listening yet",
             Some("Top artists appear here once the history has plays.".into()),
-            None,
             cx,
-        )
-        .into_any_element();
+        );
     }
     v_flex()
         .gap_4()
@@ -293,7 +290,7 @@ impl Render for TopOverTimeView {
         let data = store.top.data.as_ref();
         let subtitle = data.map(|d| {
             let mut text = String::from("Primary artist only");
-            if let Some(date) = as_of_label(&d.as_of) {
+            if let Some(date) = widgets::local_day(&d.as_of) {
                 text.push_str(&format!(" · plays before {date}"));
             }
             SharedString::from(text)
@@ -308,7 +305,7 @@ impl Render for TopOverTimeView {
             .child(Tab::new().label("Quarters"))
             .on_click(on_grain)
             .into_any_element();
-        let body = widgets::remote_view(
+        let body = widgets::page_body(
             "top-over-time-retry",
             &store.top,
             "Loading top artists over time…",
@@ -316,7 +313,6 @@ impl Render for TopOverTimeView {
             cx,
             |data| content(data, grain, cx),
         );
-        let filled = data.is_some();
         widgets::page("top-over-time")
             .track_focus(&self.focus)
             .child(widgets::page_header(
@@ -325,7 +321,7 @@ impl Render for TopOverTimeView {
                 Some(toggle),
                 cx,
             ))
-            .child(div().when(!filled, |this| this.h(px(320.))).child(body))
+            .child(body)
     }
 }
 

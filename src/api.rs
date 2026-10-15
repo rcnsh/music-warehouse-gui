@@ -297,7 +297,6 @@ impl ApiClient {
     }
 
     /// Spotify's own last plays, including any the Worker has not stored yet.
-    #[allow(dead_code)] // Full API surface; a page may not call it yet.
     pub async fn recently_played(&self, limit: u32) -> Result<RecentlyPlayedResponse, ApiError> {
         let query = [("limit", limit.clamp(1, 50).to_string())];
         self.get(self.endpoint("recently-played", &query)).await
@@ -318,7 +317,6 @@ impl ApiClient {
 
     /// Stored artists and songs whose name contains `q`; `artist` narrows
     /// the songs to those whose primary artist contains it.
-    #[allow(dead_code)] // Full API surface; a page may not call it yet.
     pub async fn search(
         &self,
         q: &str,
@@ -330,7 +328,6 @@ impl ApiClient {
     }
 
     /// Plays per song over a local-calendar range, most played first.
-    #[allow(dead_code)] // Full API surface; a page may not call it yet.
     pub async fn top_tracks(
         &self,
         range: &DateRange,
