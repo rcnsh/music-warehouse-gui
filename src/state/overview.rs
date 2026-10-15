@@ -4,7 +4,7 @@ use std::future::Future;
 use chrono::NaiveDate;
 use gpui::{Context, Task};
 
-use crate::api::{ApiClient, ApiError, TopRange};
+use crate::api::{ApiClient, ApiError, PlayFilter, TopRange};
 use crate::dates::{self, DateRange, RangePreset};
 use crate::models::{DailyResponse, TopArtistsResponse, TopResponse, TopTracksResponse};
 use crate::runtime;
@@ -204,9 +204,11 @@ impl OverviewStore {
         let range = self.range;
 
         let (client, tz) = (self.client.clone(), self.tz.clone());
-        let daily = spawn_range_request(cx, async move { client.daily(&range, &tz).await }, |s| {
-            &mut s.daily
-        });
+        let daily = spawn_range_request(
+            cx,
+            async move { client.daily(&range, &tz, &PlayFilter::default()).await },
+            |s| &mut s.daily,
+        );
         let (client, tz) = (self.client.clone(), self.tz.clone());
         let artists = spawn_range_request(
             cx,

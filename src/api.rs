@@ -18,9 +18,9 @@ use url::Url;
 use crate::dates::DateRange;
 use crate::models::{
     ARTIST_NAME_PREFIX, ArtistHistory, ConcertsResponse, DailyResponse, Eras, ErrorBody,
-    NowPlayingResponse, OnRepeat, OnThisDay, Play, PlaysResponse, RecentlyPlayedResponse, Rhythm,
-    SearchResponse, TopAlbums, TopArtistsResponse, TopOverTime, TopResponse, TopTracksResponse,
-    TrackHistory, Wrapped, WrappedRanges,
+    FilterEcho, NowPlayingResponse, OnRepeat, OnThisDay, Play, PlaysResponse,
+    RecentlyPlayedResponse, Rhythm, SearchResponse, TopAlbums, TopArtistsResponse, TopOverTime,
+    TopResponse, TopTracksResponse, TrackHistory, Wrapped, WrappedRanges,
 };
 
 /// Bearer token wrapper whose `Debug` never prints the value, so a stray
@@ -69,6 +69,9 @@ pub enum ApiError {
     Network(String),
     #[error("Unexpected response from the Worker: {0}")]
     Decode(String),
+    /// A download could not be written to disk.
+    #[error("Could not write the file: {0}")]
+    File(String),
 }
 
 impl ApiError {
@@ -221,19 +224,75 @@ impl ApiClient {
     }
 
     /// Newest-first page of plays strictly older than `before_ms` and newer
-    /// than `after_ms`, limited to those whose track, album or artist name
-    /// contains `search`. With both bounds, a search stays inside a date range.
+    /// than `after_ms`, limited to those `filter` allows. With both bounds,
+    /// a filtered list stays inside a date range.
     pub async fn plays(
         &self,
         limit: u32,
         before_ms: Option<i64>,
         after_ms: Option<i64>,
-        search: Option<&str>,
+        filter: &PlayFilter,
     ) -> Result<Vec<Play>, ApiError> {
-        let query = plays_query(limit, before_ms, after_ms, search);
+        let query = plays_query(limit, before_ms, after_ms, filter);
         let response: PlaysResponse = self.get(self.endpoint("plays", &query)).await?;
-        check_search_applied(search, response.q.as_deref())?;
+        filter.check_applied(&response.filter)?;
         Ok(response.plays)
+    }
+
+    /// The URL of every play `filter` allows between the bounds as one CSV
+    /// download, for [`ApiClient::download`]. Same bounds as [`plays`].
+    ///
+    /// [`plays`]: ApiClient::plays
+    pub fn plays_csv_url(
+        &self,
+        before_ms: Option<i64>,
+        after_ms: Option<i64>,
+        filter: &PlayFilter,
+    ) -> Url {
+        self.endpoint("plays.csv", &bounds_query(before_ms, after_ms, filter))
+    }
+
+    /// Streams `url` (one of this client's endpoints) into `file` a chunk at
+    /// a time, so a long history never sits in memory, calling `progress`
+    /// with the bytes written so far. Returns the total bytes.
+    pub async fn download(
+        &self,
+        url: Url,
+        file: &mut (impl tokio::io::AsyncWrite + Unpin),
+        progress: impl Fn(&[u8]),
+    ) -> Result<u64, ApiError> {
+        use tokio::io::AsyncWriteExt as _;
+        let mut response = self
+            .http
+            .get(url)
+            .bearer_auth(self.token.expose())
+            // The client's 20 s limit covers the whole body, and a whole
+            // history can take minutes to stream.
+            .timeout(DOWNLOAD_TIMEOUT)
+            .send()
+            .await
+            .map_err(|e| ApiError::Network(e.without_url().to_string()))?;
+        let status = response.status();
+        if status != StatusCode::OK {
+            let body = response.text().await.unwrap_or_default();
+            return Err(ApiError::from_response(status.as_u16(), &body));
+        }
+        let mut written = 0u64;
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .map_err(|e| ApiError::Network(e.without_url().to_string()))?
+        {
+            file.write_all(&chunk)
+                .await
+                .map_err(|e| ApiError::File(e.to_string()))?;
+            written += chunk.len() as u64;
+            progress(&chunk);
+        }
+        file.flush()
+            .await
+            .map_err(|e| ApiError::File(e.to_string()))?;
+        Ok(written)
     }
 
     /// Plays strictly newer than `after_ms`, still newest first.
@@ -246,9 +305,19 @@ impl ApiClient {
         Ok(response.plays)
     }
 
-    pub async fn daily(&self, range: &DateRange, tz: &str) -> Result<DailyResponse, ApiError> {
-        let query = range_query(range, tz);
-        self.get(self.endpoint("daily", &query)).await
+    /// Plays per local day, everyone's or (with a song or artist in
+    /// `filter`) one song's or artist's. `/api/daily` takes no `q`.
+    pub async fn daily(
+        &self,
+        range: &DateRange,
+        tz: &str,
+        filter: &PlayFilter,
+    ) -> Result<DailyResponse, ApiError> {
+        debug_assert!(filter.q.is_none(), "/api/daily has no text search");
+        let query = daily_query(range, tz, filter);
+        let response: DailyResponse = self.get(self.endpoint("daily", &query)).await?;
+        filter.check_applied(&response.filter)?;
+        Ok(response)
     }
 
     pub async fn top_artists(
@@ -457,34 +526,128 @@ fn concerts_query(
     query
 }
 
-/// A Worker older than search ignores `q` and returns the unfiltered list,
-/// which would look like a filter that matches everything. Search responses
-/// echo `q`, so a missing or different echo means it was not applied.
-fn check_search_applied(sent: Option<&str>, echoed: Option<&str>) -> Result<(), ApiError> {
-    match sent {
-        Some(q) if echoed != Some(q) => Err(ApiError::Decode(
-            "this Worker cannot search history. Deploy the latest music-warehouse.".into(),
-        )),
-        _ => Ok(()),
+/// Which plays `/api/plays`, `/api/plays.csv` and `/api/daily` count: a text
+/// search, one song (every edition), one artist (primary credits), or a
+/// search inside a song or artist. Empty means everyone's.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PlayFilter {
+    pub q: Option<String>,
+    pub track_id: Option<String>,
+    pub artist_id: Option<String>,
+    /// Sent with a `name:` placeholder, so the Worker can still find the
+    /// artist by name when the placeholder row itself is gone.
+    pub artist_name: Option<String>,
+}
+
+impl PlayFilter {
+    /// Every play of the song `track_id` is one edition of.
+    pub fn song(track_id: impl Into<String>) -> Self {
+        Self {
+            track_id: Some(track_id.into()),
+            ..Self::default()
+        }
+    }
+
+    /// Every play crediting the artist first. `id` is a Spotify id or a
+    /// `name:` placeholder, as [`crate::actions::OpenArtist`] carries.
+    pub fn artist(id: &str) -> Self {
+        Self {
+            artist_id: Some(id.to_owned()),
+            artist_name: id.strip_prefix(ARTIST_NAME_PREFIX).map(str::to_owned),
+            ..Self::default()
+        }
+    }
+
+    /// Narrows to plays whose track, album or artist name contains `q`.
+    pub fn search(mut self, q: Option<&str>) -> Self {
+        self.q = q.filter(|q| !q.is_empty()).map(str::to_owned);
+        self
+    }
+
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+
+    fn fields(&self) -> [(&'static str, Option<&str>); 4] {
+        [
+            ("q", self.q.as_deref()),
+            ("track_id", self.track_id.as_deref()),
+            ("artist_id", self.artist_id.as_deref()),
+            ("artist_name", self.artist_name.as_deref()),
+        ]
+    }
+
+    fn query(&self) -> Vec<(&'static str, String)> {
+        self.fields()
+            .into_iter()
+            .filter_map(|(name, value)| Some((name, value?.to_owned())))
+            .collect()
+    }
+
+    /// A Worker older than a filter ignores it and returns everyone's plays,
+    /// which would look like a filter that matches everything. Responses
+    /// echo each filter applied, so a missing or different echo means one
+    /// was not.
+    fn check_applied(&self, echo: &FilterEcho) -> Result<(), ApiError> {
+        let echoed = [
+            echo.q.as_deref(),
+            echo.track_id.as_deref(),
+            echo.artist_id.as_deref(),
+            echo.artist_name.as_deref(),
+        ];
+        for ((name, sent), echoed) in self.fields().into_iter().zip(echoed) {
+            // The Worker trims what it is sent.
+            if let Some(sent) = sent
+                && echoed != Some(sent.trim())
+            {
+                let what = if name == "q" {
+                    "search history"
+                } else {
+                    "list one song's or artist's plays"
+                };
+                return Err(ApiError::Decode(format!(
+                    "this Worker cannot {what}. Deploy the latest music-warehouse."
+                )));
+            }
+        }
+        Ok(())
     }
 }
+
+/// The longest a CSV download may take. A whole history is a few hundred
+/// thousand rows, which the Worker streams in a minute or two.
+const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
 fn plays_query(
     limit: u32,
     before_ms: Option<i64>,
     after_ms: Option<i64>,
-    search: Option<&str>,
+    filter: &PlayFilter,
 ) -> Vec<(&'static str, String)> {
     let mut query = vec![("limit", limit.to_string())];
+    query.extend(bounds_query(before_ms, after_ms, filter));
+    query
+}
+
+fn bounds_query(
+    before_ms: Option<i64>,
+    after_ms: Option<i64>,
+    filter: &PlayFilter,
+) -> Vec<(&'static str, String)> {
+    let mut query = Vec::new();
     if let Some(before) = before_ms {
         query.push(("before", before.to_string()));
     }
     if let Some(after) = after_ms {
         query.push(("after", after.to_string()));
     }
-    if let Some(q) = search {
-        query.push(("q", q.to_owned()));
-    }
+    query.extend(filter.query());
+    query
+}
+
+fn daily_query(range: &DateRange, tz: &str, filter: &PlayFilter) -> Vec<(&'static str, String)> {
+    let mut query = range_query(range, tz);
+    query.extend(filter.query());
     query
 }
 
@@ -658,44 +821,186 @@ mod tests {
         );
     }
 
+    fn search(q: &str) -> PlayFilter {
+        PlayFilter::default().search(Some(q))
+    }
+
+    fn echo(filter: &PlayFilter) -> FilterEcho {
+        FilterEcho {
+            q: filter.q.clone(),
+            track_id: filter.track_id.clone(),
+            artist_id: filter.artist_id.clone(),
+            artist_name: filter.artist_name.clone(),
+        }
+    }
+
     #[test]
-    fn search_that_was_not_echoed_is_an_error() {
-        assert!(check_search_applied(None, None).is_ok());
-        assert!(check_search_applied(Some("rosé"), Some("rosé")).is_ok());
+    fn a_filter_that_was_not_echoed_is_an_error() {
+        let none = PlayFilter::default();
+        assert!(none.check_applied(&FilterEcho::default()).is_ok());
+        assert!(search("rosé").check_applied(&echo(&search("rosé"))).is_ok());
         assert!(matches!(
-            check_search_applied(Some("rosé"), None),
+            search("rosé").check_applied(&FilterEcho::default()),
             Err(ApiError::Decode(_))
         ));
-        assert!(check_search_applied(Some("rosé"), Some("rose")).is_err());
+        assert!(
+            search("rosé")
+                .check_applied(&echo(&search("rose")))
+                .is_err()
+        );
+
+        // An older Worker echoes the search but not the song it ignored.
+        let both = PlayFilter::song("t1").search(Some("dna"));
+        assert!(both.check_applied(&echo(&both)).is_ok());
+        let Err(ApiError::Decode(message)) = both.check_applied(&echo(&search("dna"))) else {
+            panic!("an ignored song filter must fail");
+        };
+        assert!(message.contains("song"), "{message}");
     }
 
     #[test]
     fn plays_search_is_encoded_into_q() {
         let url = client().endpoint(
             "plays",
-            &plays_query(200, Some(17), None, Some("Sad & 100%")),
+            &plays_query(200, Some(17), None, &search("Sad & 100%")),
         );
         assert_eq!(
             url.as_str(),
             "https://music.example.com/api/plays?limit=200&before=17&q=Sad+%26+100%25"
         );
-        let plain = client().endpoint("plays", &plays_query(50, None, None, None));
+        let plain = client().endpoint(
+            "plays",
+            &plays_query(50, None, None, &PlayFilter::default()),
+        );
         assert_eq!(
             plain.as_str(),
             "https://music.example.com/api/plays?limit=50"
         );
+        // Searching for nothing is no search.
+        assert!(PlayFilter::default().search(Some("")).is_empty());
     }
 
     #[test]
     fn plays_search_can_stay_inside_a_date_range() {
-        let url = client().endpoint("plays", &plays_query(100, Some(20), Some(10), Some("dna")));
+        let url = client().endpoint(
+            "plays",
+            &plays_query(100, Some(20), Some(10), &search("dna")),
+        );
         assert_eq!(
             url.as_str(),
             "https://music.example.com/api/plays?limit=100&before=20&after=10&q=dna"
         );
         let response: PlaysResponse = decode(&fixture("plays-search-after.json")).unwrap();
-        assert_eq!(response.q.as_deref(), Some("kendrick"));
+        assert_eq!(response.filter.q.as_deref(), Some("kendrick"));
         assert!(!response.plays.is_empty());
+    }
+
+    #[test]
+    fn scoped_pages_ask_for_one_song_or_artist() {
+        let c = client();
+        let song = PlayFilter::song("67XC51nlZncNpHmZ8rOU9a");
+        assert_eq!(
+            c.endpoint("plays", &plays_query(100, Some(20), None, &song))
+                .as_str(),
+            "https://music.example.com/api/plays?limit=100&before=20&track_id=67XC51nlZncNpHmZ8rOU9a"
+        );
+        let artist = PlayFilter::artist("2YZyLoL8N0Wb9xBt1NhZWg").search(Some("we cry"));
+        assert_eq!(
+            c.endpoint("plays", &plays_query(100, None, Some(5), &artist))
+                .as_str(),
+            "https://music.example.com/api/plays?limit=100&after=5&q=we+cry&artist_id=2YZyLoL8N0Wb9xBt1NhZWg"
+        );
+        // A placeholder also sends its name, as the Artist page does.
+        let placeholder = PlayFilter::artist("name:Sigur Rós");
+        assert_eq!(
+            c.endpoint("plays", &plays_query(10, None, None, &placeholder))
+                .as_str(),
+            "https://music.example.com/api/plays?limit=10&artist_id=name%3ASigur+R%C3%B3s&artist_name=Sigur+R%C3%B3s"
+        );
+
+        let response: PlaysResponse = decode(&fixture("plays-scoped.json")).unwrap();
+        assert!(song.check_applied(&response.filter).is_ok());
+        assert!(
+            response
+                .plays
+                .iter()
+                .all(|p| p.track_id == "67XC51nlZncNpHmZ8rOU9a")
+        );
+    }
+
+    #[test]
+    fn csv_url_carries_the_view_filters_and_bounds_but_no_limit() {
+        let c = client();
+        assert_eq!(
+            c.plays_csv_url(None, None, &PlayFilter::default()).as_str(),
+            "https://music.example.com/api/plays.csv"
+        );
+        let filter = PlayFilter::artist("name:Sigur Rós").search(Some("hopp"));
+        assert_eq!(
+            c.plays_csv_url(Some(200), Some(100), &filter).as_str(),
+            "https://music.example.com/api/plays.csv?before=200&after=100&q=hopp&artist_id=name%3ASigur+R%C3%B3s&artist_name=Sigur+R%C3%B3s"
+        );
+        let prefixed = ApiClient::new(
+            parse_base_url("https://example.com/warehouse").unwrap(),
+            Secret::new("t"),
+        );
+        assert_eq!(
+            prefixed
+                .plays_csv_url(None, None, &PlayFilter::song("abc"))
+                .as_str(),
+            "https://example.com/warehouse/api/plays.csv?track_id=abc"
+        );
+    }
+
+    #[test]
+    fn new_play_fields_decode_and_old_rows_still_do() {
+        let response: PlaysResponse = decode(&fixture("plays-scoped.json")).unwrap();
+        let latest = &response.plays[0];
+        assert_eq!(latest.play_number, Some(6));
+        assert_eq!(latest.first_play, Some(false));
+        assert_eq!(
+            latest.context_name.as_deref(),
+            Some("Mr. Morale & The Big Steppers")
+        );
+        let credits = latest.credits();
+        assert_eq!(credits.len(), 2);
+        assert_eq!(credits[1].id.as_deref(), Some("7nkr1fevjIVmgx5biwAWVo"));
+
+        let first = response.plays.last().unwrap();
+        assert_eq!((first.play_number, first.first_play), (Some(1), Some(true)));
+        assert_eq!(first.context_name, None);
+        assert_eq!(first.credits()[1].id.as_deref(), Some("name:taylour paige"));
+
+        // Rows from a Worker before these fields fall back to the joined names.
+        let old: PlaysResponse = decode(&fixture("plays.json")).unwrap();
+        let row = &old.plays[0];
+        assert_eq!((row.play_number, row.first_play), (None, None));
+        assert_eq!(row.artist_list, None);
+        let names: Vec<_> = row.credits().into_iter().map(|c| c.name).collect();
+        assert_eq!(names, ["Kendrick Lamar", "Taylour Paige"]);
+        assert!(row.credits().iter().all(|c| c.id.is_none()));
+        assert_eq!(old.filter, FilterEcho::default());
+    }
+
+    #[test]
+    fn scoped_daily_counts_decode_with_their_echo() {
+        let response: DailyResponse = decode(&fixture("daily-artist.json")).unwrap();
+        assert_eq!(response.days.len(), 7);
+        let filter = PlayFilter::artist("2YZyLoL8N0Wb9xBt1NhZWg");
+        assert!(filter.check_applied(&response.filter).is_ok());
+        let range = DateRange::new(
+            NaiveDate::from_ymd_opt(2026, 10, 1).unwrap(),
+            NaiveDate::from_ymd_opt(2026, 10, 7).unwrap(),
+        )
+        .unwrap();
+        let query = daily_query(&range, "UTC", &PlayFilter::song("abc"));
+        assert_eq!(
+            client().endpoint("daily", &query).as_str(),
+            "https://music.example.com/api/daily?from=2026-10-01&to=2026-10-07&tz=UTC&track_id=abc"
+        );
+        // Everyone's days need no echo, so Overview works on any Worker.
+        let all: DailyResponse = decode(&fixture("daily.json")).unwrap();
+        assert!(PlayFilter::default().check_applied(&all.filter).is_ok());
     }
 
     #[test]
@@ -817,6 +1122,9 @@ mod tests {
         assert_eq!(top.quarters.len(), 3);
         assert_eq!(top.leaders[0].share.len(), top.quarters.len());
         assert!(top.quarters[2].partial);
+        assert!(top.quarters[0].tracks[0].track_id.is_some());
+        let last_year = top.years.last().unwrap();
+        assert_eq!(last_year.tracks.last().unwrap().track_id, None);
 
         let albums: TopAlbums = decode(&fixture("stats-albums.json")).unwrap();
         assert_eq!(albums.min_songs, 4);
@@ -857,6 +1165,21 @@ mod tests {
         assert_eq!(wrapped.listening_age.as_ref().unwrap().window, (2015, 2019));
         assert_eq!(wrapped.top_artists[1].top_song, None);
         assert_eq!(wrapped.streak.as_ref().unwrap().days, 64);
+
+        let artist = &wrapped.top_artists[0];
+        assert_eq!(artist.id.as_deref(), Some("2YZyLoL8N0Wb9xBt1NhZWg"));
+        assert!(wrapped.top_songs[0].track_id.is_some());
+        assert!(wrapped.top_albums[0].artist_id.is_some());
+        assert!(wrapped.months[0].top_artist_id.is_some());
+        assert_eq!(wrapped.months[1].top_artist_id, None);
+        assert!(wrapped.discoveries.top[0].id.is_some());
+        // A summary computed before the ids were added still decodes.
+        let old: Wrapped = decode(
+            r#"{"top_songs":[{"name":"DNA.","artist":"Kendrick Lamar","plays":1}],"months":[{"month":"2025-01","top_artist":"x"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(old.top_songs[0].track_id, None);
+        assert_eq!(old.months[0].top_artist_id, None);
     }
 
     #[test]
@@ -869,6 +1192,17 @@ mod tests {
         let undated = &response.concerts[2];
         assert_eq!(undated.date, None);
         assert_eq!(response.concerts[1].url, None);
+
+        // An artist not in the warehouse is billed without an id.
+        let bill = response.concerts[1].credits();
+        assert_eq!(bill[0].id.as_deref(), Some("04gDigrS5kc9YWfZHwBETP"));
+        assert_eq!(
+            (bill[1].id.as_deref(), bill[1].name.as_str()),
+            (None, "Kanye West")
+        );
+        // A row the Worker has not rewritten has no list: split the names.
+        assert_eq!(undated.artist_list, None);
+        assert_eq!(undated.credits()[0].name, "Kendrick Lamar");
 
         // Workers older than configurable regions send no `regions` list.
         let old: ConcertsResponse =

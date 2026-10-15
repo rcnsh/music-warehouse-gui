@@ -61,7 +61,9 @@
       "days": 140,
       "longest_run_days": 12,
       "top_song": "DNA.",
-      "image": "https://i.scdn.co/image/ab67616d0000b2738b52c6b9bc4e43d873869699"
+      "image": "https://i.scdn.co/image/ab67616d0000b2738b52c6b9bc4e43d873869699",
+      "id": "2YZyLoL8N0Wb9xBt1NhZWg",
+      "top_song_id": "6HZILIRieu8S0iqY8kIKhj"
     },
     {
       "name": "Kanye West",
@@ -71,7 +73,9 @@
       "days": 120,
       "longest_run_days": 6,
       "top_song": null,
-      "image": null
+      "image": null,
+      "id": "name:vierre cloud",
+      "top_song_id": null
     }
   ],
   "top_songs": [
@@ -83,7 +87,9 @@
       "plays": 149,
       "minutes": 461,
       "peak_month": "2025-08",
-      "first_played": "2025-01-03"
+      "first_played": "2025-01-03",
+      "track_id": "6HZILIRieu8S0iqY8kIKhj",
+      "artist_id": "2YZyLoL8N0Wb9xBt1NhZWg"
     }
   ],
   "top_albums": [
@@ -93,7 +99,8 @@
       "image": "https://i.scdn.co/image/ab67616d0000b2738b52c6b9bc4e43d873869699",
       "plays": 612,
       "minutes": 1980,
-      "songs": 14
+      "songs": 14,
+      "artist_id": "2YZyLoL8N0Wb9xBt1NhZWg"
     }
   ],
   "months": [
@@ -102,7 +109,9 @@
       "minutes": 3300,
       "top_artist": "Kendrick Lamar",
       "top_song": "DNA.",
-      "image": "https://i.scdn.co/image/ab67616d0000b2738b52c6b9bc4e43d873869699"
+      "image": "https://i.scdn.co/image/ab67616d0000b2738b52c6b9bc4e43d873869699",
+      "top_artist_id": "2YZyLoL8N0Wb9xBt1NhZWg",
+      "top_song_id": "6HZILIRieu8S0iqY8kIKhj"
     },
     {
       "month": "2025-02",
@@ -120,7 +129,8 @@
       {
         "name": "Vierre Cloud",
         "minutes": 410,
-        "image": null
+        "image": null,
+        "id": "name:vierre cloud"
       }
     ]
   },

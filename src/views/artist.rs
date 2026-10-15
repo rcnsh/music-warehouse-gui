@@ -4,11 +4,13 @@
 //! The shell calls only `new`, `activate`, `refresh`, `set_artist` and
 //! `Focusable::focus_handle`.
 
+use std::rc::Rc;
+
 use gpui::AppContext as _;
 use gpui::{
-    AnyElement, App, Context, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement,
-    ParentElement, Render, SharedString, Styled, Subscription, Window, div, prelude::FluentBuilder,
-    px,
+    Action, AnyElement, App, Context, Entity, FocusHandle, Focusable, InteractiveElement,
+    IntoElement, ParentElement, Render, SharedString, Styled, Subscription, Window, div,
+    prelude::FluentBuilder, px,
 };
 use gpui_component::{
     Sizable,
@@ -17,11 +19,11 @@ use gpui_component::{
 };
 use gpui_kit_assets::IconName;
 
-use crate::actions::OpenTrack;
+use crate::actions::{OpenTrack, ShowPlaysOfArtist};
 use crate::api::ApiClient;
 use crate::models::{ARTIST_NAME_PREFIX, ArtistHistory, MonthCount};
 use crate::state::artist::ArtistStore;
-use crate::views::widgets;
+use crate::views::{recent_days, widgets};
 
 pub struct ArtistView {
     store: Entity<ArtistStore>,
@@ -75,6 +77,13 @@ impl Focusable for ArtistView {
 impl Render for ArtistView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let retry = cx.listener(|this, _, _, cx| this.refresh(cx));
+        let daily_retry = cx.listener(|this, _, _, cx| this.refresh(cx));
+        let store_handle = self.store.downgrade();
+        let on_pick: recent_days::PickRange = Rc::new(move |preset, _, cx| {
+            store_handle
+                .update(cx, |s, cx| s.set_daily_preset(preset, cx))
+                .ok();
+        });
         let store = self.store.read(cx);
         let page = widgets::page("artist").track_focus(&self.focus);
         let Some(id) = store.id.clone() else {
@@ -98,7 +107,11 @@ impl Render for ArtistView {
         } else {
             "Artist · all time".into()
         };
-        let header = widgets::page_header(title, Some(subtitle), spotify.map(open_in_spotify), cx);
+        let every_play = ShowPlaysOfArtist::new(id.clone(), title.clone());
+        let controls = header_controls(every_play, spotify, "artist-every-play");
+        let header = widgets::page_header(title, Some(subtitle), Some(controls), cx);
+
+        let daily = recent_days::card("artist-daily", &store.daily, on_pick, daily_retry, cx);
 
         page.child(header).child(widgets::page_body(
             "artist-retry",
@@ -106,12 +119,36 @@ impl Render for ArtistView {
             "Loading artist…",
             retry,
             cx,
-            |data| render_history(data, cx),
+            |data| render_history(data, daily, cx),
         ))
     }
 }
 
-fn render_history(data: &ArtistHistory, cx: &App) -> AnyElement {
+/// "Show every play" (History narrowed to this song or artist), then Open
+/// in Spotify when there is a Spotify page.
+pub(crate) fn header_controls(
+    every_play: impl Action,
+    spotify: Option<String>,
+    id: &'static str,
+) -> AnyElement {
+    let every_play: Box<dyn Action> = Box::new(every_play);
+    h_flex()
+        .gap_2()
+        .child(
+            Button::new(id)
+                .small()
+                .icon(IconName::ListMusic)
+                .label("Show every play")
+                .tooltip("Every stored play, newest first, in History")
+                .on_click(move |_, window, cx| {
+                    window.dispatch_action(every_play.boxed_clone(), cx)
+                }),
+        )
+        .when_some(spotify, |this, url| this.child(open_in_spotify(url)))
+        .into_any_element()
+}
+
+fn render_history(data: &ArtistHistory, daily: AnyElement, cx: &App) -> AnyElement {
     if data.plays == 0 {
         return widgets::page_state(
             Some(IconName::Inbox),
@@ -141,6 +178,7 @@ fn render_history(data: &ArtistHistory, cx: &App) -> AnyElement {
             data.last_played.as_deref(),
             cx,
         ))
+        .child(daily)
         .child(months_card("artist-months", &data.months, cx))
         .when(!data.top_tracks.is_empty(), |this| {
             this.child(

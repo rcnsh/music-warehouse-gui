@@ -18,7 +18,7 @@ use serde::Deserialize;
 /// One row of `GET /api/plays`. Export-era rows carry names but no album,
 /// duration or ISRC, and a track missing from `tracks` leaves `track_name`
 /// null through the LEFT JOIN, hence the options.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 pub struct Play {
     pub played_at_ms: i64,
     pub track_id: String,
@@ -39,15 +39,75 @@ pub struct Play {
     /// Already joined by the Worker as "A, B" in credit order.
     #[serde(default)]
     pub artists: Option<String>,
+    /// The same credits with ids, in credit order. Absent from older
+    /// Workers; preferred over splitting `artists`, which breaks on a name
+    /// that contains a comma.
+    #[serde(default)]
+    pub artist_list: Option<Vec<Credit>>,
+    /// The playlist's, album's or artist's name. Null when there is no
+    /// context or the Worker has not resolved it, and from older Workers.
+    #[serde(default)]
+    pub context_name: Option<String>,
+    /// Which play of the song this was, every edition counted. Null until
+    /// the Worker has numbered it.
+    #[serde(default)]
+    pub play_number: Option<u32>,
+    #[serde(default)]
+    pub first_play: Option<bool>,
+}
+
+impl Play {
+    /// The credits with ids when the Worker sent them, else names split out
+    /// of `artists` without ids.
+    pub fn credits(&self) -> Vec<Credit> {
+        match &self.artist_list {
+            Some(list) if !list.is_empty() => list.clone(),
+            _ => split_credits(self.artists.as_deref().unwrap_or_default()),
+        }
+    }
+}
+
+/// A credited artist. `id` is a Spotify id or a `name:` placeholder; null on
+/// a concert bill for an artist not in the warehouse, and on credits split
+/// from a joined string.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(default)]
+pub struct Credit {
+    pub id: Option<String>,
+    pub name: String,
+}
+
+/// Credits from a string the Worker joined as "A, B", for responses without
+/// a credit list. A name that itself contains ", " is split too, which is
+/// why the list is preferred.
+pub fn split_credits(artists: &str) -> Vec<Credit> {
+    artists
+        .split(", ")
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(|name| Credit {
+            id: None,
+            name: name.to_owned(),
+        })
+        .collect()
+}
+
+/// The filters `/api/plays` and `/api/daily` applied, echoed at the top
+/// level. A Worker older than a filter ignores it and echoes nothing.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(default)]
+pub struct FilterEcho {
+    pub q: Option<String>,
+    pub track_id: Option<String>,
+    pub artist_id: Option<String>,
+    pub artist_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct PlaysResponse {
     pub plays: Vec<Play>,
-    /// The search the Worker applied, echoed back. Absent on unfiltered pages
-    /// and from Workers older than search.
-    #[serde(default)]
-    pub q: Option<String>,
+    #[serde(flatten)]
+    pub filter: FilterEcho,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -62,6 +122,8 @@ pub struct DayCount {
 #[derive(Debug, Clone, Deserialize)]
 pub struct DailyResponse {
     pub days: Vec<DayCount>,
+    #[serde(flatten)]
+    pub filter: FilterEcho,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -525,6 +587,9 @@ pub struct PeriodArtist {
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
 pub struct PeriodTrack {
+    /// The song's most-played edition in the period, which the Track page
+    /// folds back into the whole song. Absent from older Workers.
+    pub track_id: Option<String>,
     pub name: String,
     pub artist: String,
     pub plays: u32,
@@ -729,6 +794,9 @@ pub struct BiggestDay {
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
 pub struct WrappedArtist {
+    /// A Spotify id or a `name:` placeholder. Wrapped's ids are absent from
+    /// older Workers, so every one is optional.
+    pub id: Option<String>,
     pub name: String,
     pub minutes: u32,
     pub plays: u32,
@@ -742,8 +810,11 @@ pub struct WrappedArtist {
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
 pub struct WrappedSong {
+    /// The song's most-listened edition.
+    pub track_id: Option<String>,
     pub name: String,
     pub artist: String,
+    pub artist_id: Option<String>,
     pub album: Option<String>,
     pub image: Option<String>,
     pub plays: u32,
@@ -759,6 +830,7 @@ pub struct WrappedSong {
 pub struct WrappedAlbum {
     pub name: String,
     pub artist: String,
+    pub artist_id: Option<String>,
     pub image: Option<String>,
     pub plays: u32,
     pub minutes: u32,
@@ -771,6 +843,7 @@ pub struct WrappedMonth {
     pub month: String,
     pub minutes: u32,
     pub top_artist: Option<String>,
+    pub top_artist_id: Option<String>,
     pub top_song: Option<String>,
     pub image: Option<String>,
 }
@@ -789,6 +862,7 @@ pub struct Discoveries {
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
 pub struct Discovery {
+    pub id: Option<String>,
     pub name: String,
     pub minutes: u32,
     pub image: Option<String>,
@@ -838,6 +912,16 @@ pub struct ConcertsResponse {
     pub concerts: Vec<Concert>,
 }
 
+impl Concert {
+    /// The bill with ids when the Worker sent it, else split from `artists`.
+    pub fn credits(&self) -> Vec<Credit> {
+        match &self.artist_list {
+            Some(list) if !list.is_empty() => list.clone(),
+            _ => split_credits(&self.artists),
+        }
+    }
+}
+
 impl ConcertsResponse {
     /// A region's label, falling back to its key for Workers that send none.
     pub fn region_label<'a>(&'a self, key: &'a str) -> &'a str {
@@ -866,6 +950,9 @@ pub struct Concert {
     pub time: Option<String>,
     /// The matched artists on the bill, joined `"A, B"`.
     pub artists: String,
+    /// The bill with ids where the artist is in the warehouse. Null on rows
+    /// the Worker has not rewritten since it began sending it.
+    pub artist_list: Option<Vec<Credit>>,
     pub name: String,
     pub venue: Option<String>,
     pub city: Option<String>,
@@ -906,6 +993,19 @@ mod tests {
             url: url.into(),
             width,
         }
+    }
+
+    #[test]
+    fn joined_credits_split_into_names_without_ids() {
+        let names =
+            |s: &str| -> Vec<String> { split_credits(s).into_iter().map(|c| c.name).collect() };
+        assert_eq!(
+            names("Kendrick Lamar, Taylour Paige"),
+            ["Kendrick Lamar", "Taylour Paige"]
+        );
+        assert_eq!(names("SZA"), ["SZA"]);
+        assert!(names("").is_empty());
+        assert!(split_credits("A, B").iter().all(|c| c.id.is_none()));
     }
 
     #[test]

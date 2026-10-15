@@ -13,7 +13,7 @@ use gpui_component::{
     h_flex, v_flex,
 };
 
-use crate::actions::OpenArtist;
+use crate::actions::{OpenArtist, OpenTrack};
 use crate::api::ApiClient;
 use crate::models::{ListeningAge, Wrapped, WrappedRanges};
 use crate::state::wrapped::WrappedStore;
@@ -294,21 +294,22 @@ fn top_artists(w: &Wrapped, cx: &App) -> impl IntoElement {
             .subtitle(detail)
             .value(widgets::minutes(a.minutes.into()))
             .share(share_of(a.minutes, max))
-            .on_click_action(OpenArtist::by_name(&a.name))
+            .on_click_action(OpenArtist::by_id_or_name(a.id.as_deref(), &a.name))
         }))
         .when(w.top_artists.is_empty(), |this| {
             this.child(widgets::note("No artists", cx))
         })
 }
 
-/// Songs carry no track id, so a row opens the song's artist.
+/// A song opens its Track page; a summary computed before the Worker sent
+/// song ids opens the song's artist instead.
 fn top_songs(w: &Wrapped, cx: &App) -> impl IntoElement {
     let max = w.top_songs.first().map(|s| s.plays).unwrap_or(0);
     widgets::card("Top songs", cx)
         .flex_1()
         .min_w_0()
         .children(w.top_songs.iter().enumerate().map(|(i, s)| {
-            widgets::RankedRow::new(
+            let row = widgets::RankedRow::new(
                 ElementId::Name(format!("wrapped-song-{i}").into()),
                 s.name.clone(),
             )
@@ -316,8 +317,12 @@ fn top_songs(w: &Wrapped, cx: &App) -> impl IntoElement {
             .art(widgets::album_art(s.image.as_deref(), px(32.), cx))
             .subtitle(s.artist.clone())
             .value(widgets::plural(s.plays.into(), "play"))
-            .share(share_of(s.plays, max))
-            .on_click_action(OpenArtist::by_name(&s.artist))
+            .share(share_of(s.plays, max));
+            match &s.track_id {
+                Some(id) => row.on_click_action(OpenTrack::new(id.clone())),
+                None => row
+                    .on_click_action(OpenArtist::by_id_or_name(s.artist_id.as_deref(), &s.artist)),
+            }
         }))
         .when(w.top_songs.is_empty(), |this| {
             this.child(widgets::note("No songs", cx))
@@ -343,7 +348,7 @@ fn top_albums(w: &Wrapped, cx: &App) -> impl IntoElement {
             ))
             .value(widgets::minutes(a.minutes.into()))
             .share(share_of(a.minutes, max))
-            .on_click_action(OpenArtist::by_name(&a.artist))
+            .on_click_action(OpenArtist::by_id_or_name(a.artist_id.as_deref(), &a.artist))
         }))
         .when(w.top_albums.is_empty(), |this| {
             this.child(widgets::note(
@@ -369,7 +374,7 @@ fn discoveries(w: &Wrapped, cx: &App) -> impl IntoElement {
             .art(widgets::album_art(d.image.as_deref(), px(32.), cx))
             .value(widgets::minutes(d.minutes.into()))
             .share(share_of(d.minutes, max))
-            .on_click_action(OpenArtist::by_name(&d.name))
+            .on_click_action(OpenArtist::by_id_or_name(d.id.as_deref(), &d.name))
         }))
         .when(top.is_empty(), |this| {
             this.child(widgets::note("No new artists", cx))
@@ -434,7 +439,10 @@ fn months(w: &Wrapped, cx: &App) -> impl IntoElement {
         .value(widgets::minutes(m.minutes.into()))
         .share(share_of(m.minutes, max));
         match &m.top_artist {
-            Some(artist) => row.on_click_action(OpenArtist::by_name(artist)),
+            Some(artist) => row.on_click_action(OpenArtist::by_id_or_name(
+                m.top_artist_id.as_deref(),
+                artist,
+            )),
             None => row,
         }
     }))

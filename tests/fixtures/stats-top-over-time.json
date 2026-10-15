@@ -23,13 +23,15 @@
           "name": "DNA.",
           "artist": "Kendrick Lamar",
           "plays": 39,
-          "image": "https://i.scdn.co/image/ab67616d0000b2738b52c6b9bc4e43d873869699"
+          "image": "https://i.scdn.co/image/ab67616d0000b2738b52c6b9bc4e43d873869699",
+          "track_id": "6HZILIRieu8S0iqY8kIKhj"
         },
         {
           "name": "Stressed Out",
           "artist": "Twenty One Pilots",
           "plays": 21,
-          "image": null
+          "image": null,
+          "track_id": "6HZILIRieu8S0iqY8kIKhj"
         }
       ]
     },
@@ -54,13 +56,15 @@
           "name": "DNA.",
           "artist": "Kendrick Lamar",
           "plays": 39,
-          "image": "https://i.scdn.co/image/ab67616d0000b2738b52c6b9bc4e43d873869699"
+          "image": "https://i.scdn.co/image/ab67616d0000b2738b52c6b9bc4e43d873869699",
+          "track_id": "6HZILIRieu8S0iqY8kIKhj"
         },
         {
           "name": "Stressed Out",
           "artist": "Twenty One Pilots",
           "plays": 21,
-          "image": null
+          "image": null,
+          "track_id": "6HZILIRieu8S0iqY8kIKhj"
         }
       ]
     },
@@ -85,13 +89,15 @@
           "name": "DNA.",
           "artist": "Kendrick Lamar",
           "plays": 39,
-          "image": "https://i.scdn.co/image/ab67616d0000b2738b52c6b9bc4e43d873869699"
+          "image": "https://i.scdn.co/image/ab67616d0000b2738b52c6b9bc4e43d873869699",
+          "track_id": "6HZILIRieu8S0iqY8kIKhj"
         },
         {
           "name": "Stressed Out",
           "artist": "Twenty One Pilots",
           "plays": 21,
-          "image": null
+          "image": null,
+          "track_id": "6HZILIRieu8S0iqY8kIKhj"
         }
       ]
     }
@@ -118,13 +124,15 @@
           "name": "DNA.",
           "artist": "Kendrick Lamar",
           "plays": 39,
-          "image": "https://i.scdn.co/image/ab67616d0000b2738b52c6b9bc4e43d873869699"
+          "image": "https://i.scdn.co/image/ab67616d0000b2738b52c6b9bc4e43d873869699",
+          "track_id": "6HZILIRieu8S0iqY8kIKhj"
         },
         {
           "name": "Stressed Out",
           "artist": "Twenty One Pilots",
           "plays": 21,
-          "image": null
+          "image": null,
+          "track_id": "6HZILIRieu8S0iqY8kIKhj"
         }
       ]
     },
@@ -149,7 +157,8 @@
           "name": "DNA.",
           "artist": "Kendrick Lamar",
           "plays": 39,
-          "image": "https://i.scdn.co/image/ab67616d0000b2738b52c6b9bc4e43d873869699"
+          "image": "https://i.scdn.co/image/ab67616d0000b2738b52c6b9bc4e43d873869699",
+          "track_id": "6HZILIRieu8S0iqY8kIKhj"
         },
         {
           "name": "Stressed Out",

@@ -95,6 +95,8 @@ pub enum SavedRange {
     Last7Days,
     #[serde(rename = "30_days")]
     Last30Days,
+    #[serde(rename = "90_days")]
+    Last90Days,
     #[serde(rename = "1_year")]
     LastYear,
     Custom {
@@ -169,6 +171,7 @@ impl SavedRange {
         match preset {
             RangePreset::Last7Days => Self::Last7Days,
             RangePreset::Last30Days => Self::Last30Days,
+            RangePreset::Last90Days => Self::Last90Days,
             RangePreset::LastYear => Self::LastYear,
             RangePreset::Custom => Self::Custom {
                 from: range.query_from(),
@@ -183,6 +186,7 @@ impl SavedRange {
         let preset = match self {
             Self::Last7Days => RangePreset::Last7Days,
             Self::Last30Days => RangePreset::Last30Days,
+            Self::Last90Days => RangePreset::Last90Days,
             Self::LastYear => RangePreset::LastYear,
             Self::Custom { from, to } => {
                 let parse = |s: &str| NaiveDate::parse_from_str(s, "%Y-%m-%d").ok();

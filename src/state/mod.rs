@@ -7,6 +7,7 @@ pub mod albums;
 pub mod artist;
 pub mod concerts;
 pub mod eras;
+pub mod export;
 pub mod history;
 pub mod now_playing;
 pub mod on_repeat;
@@ -22,6 +23,8 @@ use std::future::Future;
 use gpui::{Context, Task};
 
 use crate::api::ApiError;
+use crate::dates::{self, DateRange, RangePreset};
+use crate::models::DailyResponse;
 use crate::runtime;
 
 /// Runs `request` on the HTTP runtime and stores its result in the
@@ -53,6 +56,36 @@ where
         })
         .ok();
     })
+}
+
+/// One song's or artist's plays per day over a recent range, as the Artist
+/// and Track pages chart them beside their all-time months.
+#[derive(Debug)]
+pub struct RecentDays {
+    pub preset: RangePreset,
+    /// The days last asked for, so the chart's caption matches its bars.
+    pub range: Option<DateRange>,
+    pub days: Remote<DailyResponse>,
+}
+
+impl Default for RecentDays {
+    fn default() -> Self {
+        Self {
+            preset: RangePreset::Last90Days,
+            range: None,
+            days: Remote::default(),
+        }
+    }
+}
+
+impl RecentDays {
+    /// Marks a fetch started and returns the range to ask for, ending today.
+    pub fn start(&mut self) -> Option<DateRange> {
+        let range = self.preset.resolve(dates::today_local())?;
+        self.range = Some(range);
+        self.days.start();
+        Some(range)
+    }
 }
 
 /// A remote value that keeps its last good data while reloading or after a

@@ -14,9 +14,9 @@ use gpui_component::{
 };
 use gpui_kit_assets::IconName;
 
-use crate::actions::OpenSettings;
+use crate::actions::{OpenArtist, OpenSettings};
 use crate::api::ApiError;
-use crate::models::{ImageRef, Rendition, album_rendition, pick_image};
+use crate::models::{Credit, ImageRef, Rendition, album_rendition, pick_image};
 use crate::state::Remote;
 
 /// What to tell the user about an error: a headline, then what to do.
@@ -61,6 +61,7 @@ pub fn describe(error: &ApiError) -> ErrorCopy {
             "Unexpected response",
             format!("The Worker's response did not match what this app expects: {message}"),
         ),
+        ApiError::File(message) => ("Could not save the file", message.clone()),
     };
     ErrorCopy {
         title: title.into(),
@@ -788,14 +789,36 @@ where
     Some((day(at.date_naive()), at.format("%H:%M").to_string()))
 }
 
-/// The credited artists of a play or a concert bill, which the Worker joins
-/// as "A, B" without ids. A name that itself contains ", " is split too.
-pub fn artist_names(artists: &str) -> Vec<&str> {
-    artists
-        .split(", ")
-        .map(str::trim)
-        .filter(|name| !name.is_empty())
-        .collect()
+/// Each credited artist a link to their page, comma-separated. A credit with
+/// an id opens that artist; one without (an older Worker's joined names, an
+/// artist on a concert bill the warehouse does not know) opens by name.
+pub fn credit_links(id: impl Into<SharedString>, credits: &[Credit], cx: &App) -> gpui::Div {
+    let id = id.into();
+    let mut row = h_flex().flex_wrap();
+    for (ix, credit) in credits.iter().enumerate() {
+        if ix > 0 {
+            row = row.child(div().pr_1().child(","));
+        }
+        row = row.child(link(
+            ElementId::named_usize(id.clone(), ix),
+            credit.name.clone(),
+            OpenArtist::by_id_or_name(credit.id.as_deref(), &credit.name),
+            cx,
+        ));
+    }
+    row
+}
+
+/// "1st", "2nd", "3rd", "4th", with 11th to 13th as English has them.
+pub fn ordinal(n: u32) -> String {
+    let suffix = match (n % 10, n % 100) {
+        (_, 11..=13) => "th",
+        (1, _) => "st",
+        (2, _) => "nd",
+        (3, _) => "rd",
+        _ => "th",
+    };
+    format!("{}{suffix}", count(n.into()))
 }
 
 pub const WEEKDAYS: [&str; 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -862,13 +885,26 @@ mod tests {
     }
 
     #[test]
-    fn credits_split_into_names() {
-        assert_eq!(
-            artist_names("Kendrick Lamar, Taylour Paige"),
-            ["Kendrick Lamar", "Taylour Paige"]
-        );
-        assert_eq!(artist_names("SZA"), ["SZA"]);
-        assert!(artist_names("").is_empty());
+    fn ordinals() {
+        let cases = [
+            (1, "1st"),
+            (2, "2nd"),
+            (3, "3rd"),
+            (4, "4th"),
+            (11, "11th"),
+            (12, "12th"),
+            (13, "13th"),
+            (21, "21st"),
+            (22, "22nd"),
+            (23, "23rd"),
+            (101, "101st"),
+            (111, "111th"),
+            (112, "112th"),
+            (1001, "1,001st"),
+        ];
+        for (n, want) in cases {
+            assert_eq!(ordinal(n), want);
+        }
     }
 
     #[test]
