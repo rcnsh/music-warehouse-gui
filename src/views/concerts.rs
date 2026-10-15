@@ -278,7 +278,7 @@ fn render_show(region: &str, index: usize, show: &Concert, cx: &App) -> AnyEleme
                     this.child(div().text_xs().text_color(muted).truncate().child(detail))
                 }),
         )
-        .when_some(show.url.clone(), |this, url| {
+        .when_some(show.url.as_deref().and_then(web_link), |this, url| {
             this.child(
                 Button::new(SharedString::from(format!("{id}-tickets")))
                     .small()
@@ -384,9 +384,30 @@ fn checked_ago(iso: &str, now: DateTime<Utc>) -> Option<String> {
     })
 }
 
+/// A ticket link as the browser should get it, or `None` for anything but
+/// http(s). The URL comes from Ticketmaster through the Worker, and handing
+/// macOS a `file:` or custom-scheme URL would open whatever claims it.
+fn web_link(raw: &str) -> Option<String> {
+    let url = url::Url::parse(raw.trim()).ok()?;
+    matches!(url.scheme(), "https" | "http").then(|| url.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_web_links_are_opened() {
+        assert_eq!(
+            web_link("https://www.ticketmaster.co.uk/event/123").as_deref(),
+            Some("https://www.ticketmaster.co.uk/event/123")
+        );
+        assert!(web_link("http://example.com/x").is_some());
+        assert_eq!(web_link("file:///Applications/Calculator.app"), None);
+        assert_eq!(web_link("javascript:alert(1)"), None);
+        assert_eq!(web_link("vscode://open"), None);
+        assert_eq!(web_link("not a url"), None);
+    }
 
     fn fixture() -> ConcertsResponse {
         serde_json::from_str(include_str!(concat!(
