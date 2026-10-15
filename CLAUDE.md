@@ -190,7 +190,7 @@ example: it once filtered only loaded rows, and now sends `q` to
 - `src/views/`: one file per view, each page in its own (see Pages below).
   `nav.rs` names the pages (`Section`, `Page`, sidebar `GROUPS`, Back stack);
   `shell.rs` owns the page views and holds the sidebar and top bar;
-  `widgets.rs` holds shared states and page building blocks;
+  `widgets/` holds shared states, rows, charts and page building blocks;
   `recent_days.rs` is the "Plays per day" card both Artist and Track use
 - `src/ui_state.rs`: window frame, last page and ranges in `ui-state.json`
 - `src/dev_capture.rs`: scripted captures, `dev-capture` builds only
@@ -210,7 +210,7 @@ shown (pages load on the first), `refresh(cx)` on ⌘R, and
 `track_focus` its focus handle, or actions dispatched while it is showing
 never reach the shell.
 
-Build pages from `views/widgets.rs` rather than restyling: `page` (the
+Build pages from `views/widgets/` rather than restyling: `page` (the
 scrolling column), `page_header`, `section_heading`, `card`, `stat_tile`,
 `RankedRow`, `bar_chart`, `sparkline`, `top_scale` (a ranked list's bar
 scale), the art helpers, and the formatting

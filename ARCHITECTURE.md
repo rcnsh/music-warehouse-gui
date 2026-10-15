@@ -51,7 +51,7 @@ config.json + Keychain ──> AppRoot ──> SetupView      (no config or toke
 | `src/state/<page>.rs` | One store per page (artist, track, albums, wrapped, on_repeat, on_this_day, rhythm, top_over_time, eras, concerts) |
 | `src/state/mod.rs` | `Remote<T>`: keeps last good data through a failed refresh; `fetch` runs a request into one, asking again while the Worker answers "still computing" (503 with `Retry-After`); `RecentDays` for the Artist and Track daily charts |
 | `src/views/nav.rs` | Pages (`Section`, `Page`), sidebar groups, labels, icons, shortcuts, Back stack |
-| `src/views/` | One file per view; `widgets.rs` has shared states and page building blocks |
+| `src/views/` | One file per view; `widgets/` has shared states (`states.rs`), rows (`rows.rs`), charts (`charts.rs`) and the other page building blocks (`mod.rs`) |
 | `src/dev_capture.rs` | `dev-capture` feature only: render the window to PNG, dispatch actions, scroll and click on request |
 | `tests/fixtures/` | Captured and hand-written API responses used by unit tests (see `NOTES.md`) |
 | `scripts/bundle-macos.sh` | Builds, ad-hoc signs and zips `Music Warehouse.app` |
