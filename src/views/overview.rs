@@ -27,10 +27,9 @@ use gpui_kit_assets::IconName;
 use crate::actions::{OpenArtist, OpenTrack};
 use crate::api::{ApiClient, ApiError, TopRange};
 use crate::dates::{self, RangePreset};
-use crate::models::{DayCount, ImageRef, join_names, pick_image};
+use crate::models::{DayCount, join_names};
 use crate::state::overview::OverviewStore;
 use crate::ui_state::{self, SavedRange};
-use crate::views::history::group;
 use crate::views::widgets;
 
 pub struct ArtistsTable {
@@ -98,7 +97,7 @@ impl TableDelegate for ArtistsTable {
                         div()
                             .w(px(48.))
                             .text_right()
-                            .child(group(artist.plays as usize)),
+                            .child(widgets::count(artist.plays.into())),
                     )
                     .child(
                         div()
@@ -505,7 +504,7 @@ impl OverviewView {
             (Some(response), None) => {
                 // Lines are 32px tall at 2x, so 64px renditions stay sharp.
                 let artists = response.artists.items.iter().enumerate().map(|(ix, a)| {
-                    let art = widgets::artwork(image_url(&a.images), px(32.), true, cx);
+                    let art = widgets::spotify_art(&a.images, px(32.), true, cx);
                     ranked_line(ix, art, a.name.clone().unwrap_or_default(), None, muted)
                 });
                 let tracks = response.tracks.items.iter().enumerate().map(|(ix, t)| {
@@ -514,7 +513,7 @@ impl OverviewView {
                         .as_ref()
                         .map(|a| a.images.as_slice())
                         .unwrap_or_default();
-                    let art = widgets::artwork(image_url(images), px(32.), false, cx);
+                    let art = widgets::spotify_art(images, px(32.), false, cx);
                     ranked_line(
                         ix,
                         art,
@@ -585,10 +584,6 @@ fn section_label(text: &'static str, cx: &App) -> impl IntoElement {
         .font_semibold()
         .text_color(cx.theme().muted_foreground)
         .child(text)
-}
-
-fn image_url(images: &[ImageRef]) -> Option<SharedString> {
-    pick_image(images, 64).map(|url| SharedString::from(url.to_owned()))
 }
 
 fn ranked_line(

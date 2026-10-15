@@ -250,7 +250,7 @@ impl TableDelegate for PlaysTable {
             )
             .into_any_element();
         };
-        let day = |d: chrono::NaiveDate| d.format("%-d %b %Y").to_string();
+        let day = widgets::day;
         let scope = match (store.since(), store.anchor()) {
             (Some(from), Some(to)) => {
                 format!("Searched every play from {} to {}.", day(from), day(to))
@@ -588,7 +588,7 @@ impl HistoryView {
             Some(_) => ("matching plays", "matching"),
             None => ("plays", "stored"),
         };
-        let n = group(loaded);
+        let n = widgets::count(loaded as u64);
         let text = match (store.is_loading(), store.has_more()) {
             (true, _) if loaded > 0 => format!("{n} {noun} loaded · loading older…"),
             (true, _) if store.query().is_some() => "Searching…".to_owned(),
@@ -747,19 +747,6 @@ impl Render for HistoryView {
     }
 }
 
-/// Thousands separators for counts in status text.
-pub fn group(n: usize) -> String {
-    let digits = n.to_string();
-    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
-    for (i, ch) in digits.chars().enumerate() {
-        if i > 0 && (digits.len() - i).is_multiple_of(3) {
-            out.push(',');
-        }
-        out.push(ch);
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -792,13 +779,5 @@ mod tests {
             parse_since("2024-06-01", end, today),
             Ok(Some(day("2024-06-01")))
         );
-    }
-
-    #[test]
-    fn grouping() {
-        assert_eq!(group(0), "0");
-        assert_eq!(group(999), "999");
-        assert_eq!(group(1000), "1,000");
-        assert_eq!(group(1234567), "1,234,567");
     }
 }

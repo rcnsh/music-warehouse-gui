@@ -160,10 +160,7 @@ impl Render for OnThisDayView {
         let controls = self.render_controls(shown, cx);
         let retry = cx.listener(|this, _, _, cx| this.refresh(cx));
         let store = self.store.read(cx);
-        // The loading and error panels fill their parent, so they need a
-        // height; loaded content sizes itself and scrolls with the page.
-        let waiting = store.day.data.is_none();
-        let body = widgets::remote_view(
+        let body = widgets::page_body(
             "on-this-day-retry",
             &store.day,
             "Looking back at this day…",
@@ -182,26 +179,21 @@ impl Render for OnThisDayView {
             .when_some(self.date_error.clone(), |this, message| {
                 this.child(div().text_xs().text_color(cx.theme().danger).child(message))
             })
-            .child(div().when(waiting, |this| this.h(px(320.))).child(body))
+            .child(body)
     }
 }
 
 fn render_day(data: &OnThisDay, cx: &App) -> AnyElement {
     let Ok(date) = NaiveDate::parse_from_str(&data.date, "%Y-%m-%d") else {
-        return widgets::state_panel(None, "Unexpected date from the Worker", None, None, cx)
-            .into_any_element();
+        return widgets::page_state(None, "Unexpected date from the Worker", None, cx);
     };
     if data.years.is_empty() {
-        return div()
-            .h(px(320.))
-            .child(widgets::state_panel(
-                Some(Icon::new(IconName::CalendarDays)),
-                format!("Nothing played on {} in earlier years", day_month(date)),
-                Some("Try another day with the arrows or the date box.".into()),
-                None,
-                cx,
-            ))
-            .into_any_element();
+        return widgets::page_state(
+            Some(IconName::CalendarDays),
+            format!("Nothing played on {} in earlier years", day_month(date)),
+            Some("Try another day with the arrows or the date box.".into()),
+            cx,
+        );
     }
     v_flex()
         .gap_5()
@@ -267,10 +259,7 @@ fn subtitle(shown: NaiveDate, today: NaiveDate) -> String {
 }
 
 fn years_ago(years: i32) -> String {
-    match years {
-        1 => "1 year ago".into(),
-        n => format!("{n} years ago"),
-    }
+    format!("{} ago", widgets::plural(years.max(0) as u64, "year"))
 }
 
 /// Any real date, past or future: a future date still looks back over the

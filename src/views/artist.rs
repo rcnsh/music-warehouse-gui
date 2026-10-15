@@ -4,15 +4,14 @@
 //! The shell calls only `new`, `activate`, `refresh`, `set_artist` and
 //! `Focusable::focus_handle`.
 
-use chrono::{DateTime, TimeZone};
 use gpui::AppContext as _;
 use gpui::{
-    AnyElement, App, ClickEvent, Context, Entity, FocusHandle, Focusable, InteractiveElement,
-    IntoElement, ParentElement, Render, SharedString, Styled, Subscription, Window, div,
-    prelude::FluentBuilder, px,
+    AnyElement, App, Context, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement,
+    ParentElement, Render, SharedString, Styled, Subscription, Window, div, prelude::FluentBuilder,
+    px,
 };
 use gpui_component::{
-    Icon, Sizable,
+    Sizable,
     button::{Button, ButtonVariants},
     h_flex, v_flex,
 };
@@ -21,7 +20,6 @@ use gpui_kit_assets::IconName;
 use crate::actions::OpenTrack;
 use crate::api::ApiClient;
 use crate::models::{ARTIST_NAME_PREFIX, ArtistHistory, MonthCount};
-use crate::state::Remote;
 use crate::state::artist::ArtistStore;
 use crate::views::widgets;
 
@@ -80,13 +78,12 @@ impl Render for ArtistView {
         let store = self.store.read(cx);
         let page = widgets::page("artist").track_focus(&self.focus);
         let Some(id) = store.id.clone() else {
-            return page.child(div().h(px(360.)).child(widgets::state_panel(
-                Some(Icon::new(IconName::MicVocal)),
+            return page.child(widgets::page_state(
+                Some(IconName::MicVocal),
                 "No artist selected",
                 Some("Open an artist from Overview, a ranking or a song's page.".into()),
-                None,
                 cx,
-            )));
+            ));
         };
 
         let data = store.history.data.as_ref();
@@ -103,57 +100,25 @@ impl Render for ArtistView {
         };
         let header = widgets::page_header(title, Some(subtitle), spotify.map(open_in_spotify), cx);
 
-        page.child(header)
-            .child(body(&store.history, "artist-retry", retry, cx, |data| {
-                render_history(data, cx)
-            }))
-    }
-}
-
-/// A store's three states inside a scrolling page: the shared loading and
-/// error panels at a fixed height until the first answer, then the content,
-/// under a retry banner when a later refresh failed.
-pub(crate) fn body<T>(
-    remote: &Remote<T>,
-    id: &'static str,
-    on_retry: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    cx: &App,
-    content: impl FnOnce(&T) -> AnyElement,
-) -> AnyElement {
-    match (&remote.data, &remote.error) {
-        (Some(data), error) => v_flex()
-            .gap_4()
-            .when_some(error.as_ref(), |this, error| {
-                this.child(widgets::error_banner(id, error, on_retry, cx))
-            })
-            .child(content(data))
-            .into_any_element(),
-        (None, _) => div()
-            .h(px(360.))
-            .child(widgets::remote_view(
-                id,
-                remote,
-                "Loading…",
-                on_retry,
-                cx,
-                |_| div().into_any_element(),
-            ))
-            .into_any_element(),
+        page.child(header).child(widgets::page_body(
+            "artist-retry",
+            &store.history,
+            "Loading artist…",
+            retry,
+            cx,
+            |data| render_history(data, cx),
+        ))
     }
 }
 
 fn render_history(data: &ArtistHistory, cx: &App) -> AnyElement {
     if data.plays == 0 {
-        return div()
-            .h(px(320.))
-            .child(widgets::state_panel(
-                Some(Icon::new(IconName::Inbox)),
-                "No plays for this artist",
-                Some("The warehouse has no plays where this artist is the primary artist.".into()),
-                None,
-                cx,
-            ))
-            .into_any_element();
+        return widgets::page_state(
+            Some(IconName::Inbox),
+            "No plays for this artist",
+            Some("The warehouse has no plays where this artist is the primary artist.".into()),
+            cx,
+        );
     }
     let top = data.top_tracks.first().map_or(0, |t| t.plays).max(1) as f32;
     let songs = data.top_tracks.iter().enumerate().map(|(ix, song)| {
@@ -195,7 +160,7 @@ pub(crate) fn stat_tiles(
     last: Option<&str>,
     cx: &App,
 ) -> impl IntoElement {
-    let when = |iso: Option<&str>| match iso.and_then(|iso| played_on(iso, &chrono::Local)) {
+    let when = |iso: Option<&str>| match iso.and_then(widgets::local_day_time) {
         Some((day, time)) => (SharedString::from(day), Some(SharedString::from(time))),
         None => ("—".into(), None),
     };
@@ -256,18 +221,6 @@ fn month_points(months: &[MonthCount]) -> Vec<(SharedString, f64)> {
         .collect()
 }
 
-/// An ISO 8601 instant as a local day and time: `("16 Jul 2017", "16:32")`.
-pub(crate) fn played_on<Tz: TimeZone>(iso: &str, tz: &Tz) -> Option<(String, String)>
-where
-    Tz::Offset: std::fmt::Display,
-{
-    let at = DateTime::parse_from_rfc3339(iso).ok()?.with_timezone(tz);
-    Some((
-        at.format("%-d %b %Y").to_string(),
-        at.format("%H:%M").to_string(),
-    ))
-}
-
 /// A Spotify web link for a real artist id; `name:` placeholders have no page.
 /// Web rather than `spotify:` so it works with or without the desktop app.
 fn artist_url(id: &str) -> Option<String> {
@@ -294,17 +247,6 @@ fn artist_title(name: Option<&str>, id: &str) -> SharedString {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::FixedOffset;
-
-    #[test]
-    fn instants_read_in_the_local_zone() {
-        let singapore = FixedOffset::east_opt(8 * 3600).unwrap();
-        assert_eq!(
-            played_on("2017-07-16T16:32:15.000Z", &singapore),
-            Some(("17 Jul 2017".into(), "00:32".into()))
-        );
-        assert_eq!(played_on("not a date", &singapore), None);
-    }
 
     #[test]
     fn only_real_ids_link_to_spotify() {

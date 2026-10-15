@@ -2,14 +2,14 @@
 //! more than usual over the last whole days, each song with its day-by-day
 //! plays.
 
-use chrono::{Days, Local, NaiveDate};
+use chrono::{Days, NaiveDate};
 use gpui::AppContext as _;
 use gpui::{
     AnyElement, App, Context, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement,
     ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Subscription, Window,
     div, prelude::FluentBuilder, px,
 };
-use gpui_component::{ActiveTheme, Icon, h_flex, v_flex};
+use gpui_component::{ActiveTheme, h_flex, v_flex};
 use gpui_kit_assets::IconName;
 
 use crate::actions::{OpenArtist, OpenTrack};
@@ -67,17 +67,14 @@ fn window_dates(last_midnight: NaiveDate, days: u32) -> (NaiveDate, NaiveDate) {
 }
 
 fn window_subtitle(data: &OnRepeat) -> SharedString {
-    let midnight = chrono::DateTime::parse_from_rfc3339(&data.as_of)
-        .ok()
-        .map(|t| t.with_timezone(&Local).date_naive());
-    match midnight {
+    match widgets::local_date(&data.as_of) {
         Some(midnight) => {
             let (first, last) = window_dates(midnight, data.window_days);
             format!(
                 "Played far more than usual over the last {} days, {} – {}",
                 data.window_days,
                 first.format("%-d %b"),
-                last.format("%-d %b %Y")
+                widgets::day(last)
             )
         }
         None => format!(
@@ -172,8 +169,8 @@ fn album_rows(albums: &[RepeatAlbum], cx: &App) -> AnyElement {
 
 fn content(data: &OnRepeat, cx: &App) -> AnyElement {
     if data.tracks.is_empty() && data.albums.is_empty() {
-        return widgets::state_panel(
-            Some(Icon::new(IconName::Repeat)),
+        return widgets::page_state(
+            Some(IconName::Repeat),
             "Nothing on repeat",
             Some(
                 format!(
@@ -182,10 +179,8 @@ fn content(data: &OnRepeat, cx: &App) -> AnyElement {
                 )
                 .into(),
             ),
-            None,
             cx,
-        )
-        .into_any_element();
+        );
     }
     v_flex()
         .gap_4()
@@ -225,7 +220,7 @@ impl Render for OnRepeatView {
         let store = self.store.read(cx);
         let data = store.on_repeat.data.as_ref();
         let subtitle = data.map(window_subtitle);
-        let body = widgets::remote_view(
+        let body = widgets::page_body(
             "on-repeat-retry",
             &store.on_repeat,
             "Loading what's on repeat…",
@@ -233,11 +228,10 @@ impl Render for OnRepeatView {
             cx,
             |data| content(data, cx),
         );
-        let filled = data.is_some();
         widgets::page("on-repeat")
             .track_focus(&self.focus)
             .child(widgets::page_header("On Repeat", subtitle, None, cx))
-            .child(div().when(!filled, |this| this.h(px(320.))).child(body))
+            .child(body)
     }
 }
 

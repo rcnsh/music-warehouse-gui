@@ -8,7 +8,7 @@ use gpui::{
     prelude::FluentBuilder, px,
 };
 use gpui_component::{
-    ActiveTheme, Selectable, Sizable,
+    Selectable, Sizable,
     button::{Button, ButtonVariants},
     h_flex, v_flex,
 };
@@ -17,7 +17,6 @@ use crate::actions::OpenArtist;
 use crate::api::ApiClient;
 use crate::models::{ListeningAge, Wrapped, WrappedRanges};
 use crate::state::wrapped::WrappedStore;
-use crate::views::rhythm::page_body;
 use crate::views::widgets;
 
 pub struct WrappedView {
@@ -102,8 +101,8 @@ impl Render for WrappedView {
         let subtitle = store.wrapped.data.as_ref().map(|w| {
             SharedString::from(format!(
                 "{} – {}, {} days. Minutes are estimates.",
-                day_label(&w.range.from),
-                day_label(&w.range.to),
+                widgets::day_label(&w.range.from),
+                widgets::day_label(&w.range.to),
                 w.range.days
             ))
         });
@@ -113,7 +112,7 @@ impl Render for WrappedView {
             }
             _ => "Loading Wrapped…",
         };
-        let body = page_body(
+        let body = widgets::page_body(
             "wrapped-ranges-retry",
             &store.ranges,
             "Loading Wrapped ranges…",
@@ -121,20 +120,14 @@ impl Render for WrappedView {
             cx,
             |ranges| {
                 if ranges.ranges.is_empty() {
-                    return div()
-                        .h(px(360.))
-                        .child(widgets::state_panel(
-                            None,
-                            "No plays to summarise yet",
-                            Some(
-                                "Wrapped covers each year with plays, and this year so far.".into(),
-                            ),
-                            None,
-                            cx,
-                        ))
-                        .into_any_element();
+                    return widgets::page_state(
+                        None,
+                        "No plays to summarise yet",
+                        Some("Wrapped covers each year with plays, and this year so far.".into()),
+                        cx,
+                    );
                 }
-                page_body(
+                widgets::page_body(
                     "wrapped-retry",
                     &store.wrapped,
                     loading_label,
@@ -220,15 +213,22 @@ fn highlights(w: &Wrapped, cx: &App) -> impl IntoElement {
     let d = &w.discoveries;
     let (day, day_detail) = match &w.biggest_day {
         Some(day) => (
-            day_label(&day.date),
+            widgets::day_label(&day.date),
             Some(widgets::minutes(day.minutes.into()).into()),
         ),
         None => ("None".to_owned(), None),
     };
     let (streak, streak_detail) = match &w.streak {
         Some(s) => (
-            plural(s.days, "day"),
-            Some(format!("{} – {}", day_label(&s.from), day_label(&s.to)).into()),
+            widgets::plural(s.days.into(), "day"),
+            Some(
+                format!(
+                    "{} – {}",
+                    widgets::day_label(&s.from),
+                    widgets::day_label(&s.to)
+                )
+                .into(),
+            ),
         ),
         None => ("None".to_owned(), None),
     };
@@ -274,20 +274,17 @@ fn share_of(value: u32, max: u32) -> f32 {
     }
 }
 
-fn empty_note(text: impl Into<SharedString>, cx: &App) -> impl IntoElement {
-    div()
-        .text_sm()
-        .text_color(cx.theme().muted_foreground)
-        .child(text.into())
-}
-
 fn top_artists(w: &Wrapped, cx: &App) -> impl IntoElement {
     let max = w.top_artists.first().map(|a| a.minutes).unwrap_or(0);
     widgets::card("Top artists", cx)
         .flex_1()
         .min_w_0()
         .children(w.top_artists.iter().enumerate().map(|(i, a)| {
-            let detail = format!("{} on {}", plural(a.plays, "play"), plural(a.days, "day"));
+            let detail = format!(
+                "{} on {}",
+                widgets::plural(a.plays.into(), "play"),
+                widgets::plural(a.days.into(), "day")
+            );
             widgets::RankedRow::new(
                 ElementId::Name(format!("wrapped-artist-{i}").into()),
                 a.name.clone(),
@@ -300,7 +297,7 @@ fn top_artists(w: &Wrapped, cx: &App) -> impl IntoElement {
             .on_click_action(OpenArtist::by_name(&a.name))
         }))
         .when(w.top_artists.is_empty(), |this| {
-            this.child(empty_note("No artists", cx))
+            this.child(widgets::note("No artists", cx))
         })
 }
 
@@ -318,12 +315,12 @@ fn top_songs(w: &Wrapped, cx: &App) -> impl IntoElement {
             .rank(i + 1)
             .art(widgets::album_art(s.image.as_deref(), px(32.), cx))
             .subtitle(s.artist.clone())
-            .value(plural(s.plays, "play"))
+            .value(widgets::plural(s.plays.into(), "play"))
             .share(share_of(s.plays, max))
             .on_click_action(OpenArtist::by_name(&s.artist))
         }))
         .when(w.top_songs.is_empty(), |this| {
-            this.child(empty_note("No songs", cx))
+            this.child(widgets::note("No songs", cx))
         })
 }
 
@@ -339,13 +336,20 @@ fn top_albums(w: &Wrapped, cx: &App) -> impl IntoElement {
             )
             .rank(i + 1)
             .art(widgets::album_art(a.image.as_deref(), px(32.), cx))
-            .subtitle(format!("{}, {}", a.artist, plural(a.songs, "song")))
+            .subtitle(format!(
+                "{}, {}",
+                a.artist,
+                widgets::plural(a.songs.into(), "song")
+            ))
             .value(widgets::minutes(a.minutes.into()))
             .share(share_of(a.minutes, max))
             .on_click_action(OpenArtist::by_name(&a.artist))
         }))
         .when(w.top_albums.is_empty(), |this| {
-            this.child(empty_note("No album had three different songs played", cx))
+            this.child(widgets::note(
+                "No album had three different songs played",
+                cx,
+            ))
         })
 }
 
@@ -355,7 +359,7 @@ fn discoveries(w: &Wrapped, cx: &App) -> impl IntoElement {
     widgets::card("Discoveries", cx)
         .flex_1()
         .min_w_0()
-        .child(empty_note("Artists first played in this range", cx))
+        .child(widgets::note("Artists first played in this range", cx))
         .children(top.iter().enumerate().map(|(i, d)| {
             widgets::RankedRow::new(
                 ElementId::Name(format!("wrapped-discovery-{i}").into()),
@@ -368,24 +372,18 @@ fn discoveries(w: &Wrapped, cx: &App) -> impl IntoElement {
             .on_click_action(OpenArtist::by_name(&d.name))
         }))
         .when(top.is_empty(), |this| {
-            this.child(empty_note("No new artists", cx))
+            this.child(widgets::note("No new artists", cx))
         })
 }
 
-const WEEKDAYS: [&str; 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-
 fn hour_points(hours: &[u32]) -> Vec<(SharedString, f64)> {
-    hours
-        .iter()
-        .enumerate()
-        .map(|(hour, &m)| (format!("{hour:02}").into(), m.into()))
-        .collect()
+    widgets::hour_points(hours.iter().map(|&m| m.into()))
 }
 
 fn weekday_points(weekdays: &[u32]) -> Vec<(SharedString, f64)> {
     weekdays
         .iter()
-        .zip(WEEKDAYS)
+        .zip(widgets::WEEKDAYS)
         .map(|(&m, day)| (day.into(), m.into()))
         .collect()
 }
@@ -445,7 +443,7 @@ fn months(w: &Wrapped, cx: &App) -> impl IntoElement {
 fn decades(age: &ListeningAge, cx: &App) -> impl IntoElement {
     let max = age.decades.iter().map(|d| d.share).fold(0., f64::max);
     widgets::card("Music by decade of release", cx)
-        .child(empty_note(
+        .child(widgets::note(
             "Share of minutes with a known release year, by when the music came out",
             cx,
         ))
@@ -457,27 +455,13 @@ fn decades(age: &ListeningAge, cx: &App) -> impl IntoElement {
             .value(widgets::percent(d.share))
             .share(if max > 0. { (d.share / max) as f32 } else { 0. })
         }))
-        .child(empty_note(
+        .child(widgets::note(
             format!(
                 "Release years known for {} of minutes",
                 widgets::percent(age.coverage)
             ),
             cx,
         ))
-}
-
-fn plural(n: u32, unit: &str) -> String {
-    match n {
-        1 => format!("1 {unit}"),
-        n => format!("{} {unit}s", widgets::count(n.into())),
-    }
-}
-
-/// `2025-08-14` → `14 Aug 2025`; anything else unchanged.
-fn day_label(day: &str) -> String {
-    chrono::NaiveDate::parse_from_str(day, "%Y-%m-%d")
-        .map(|d| d.format("%-d %b %Y").to_string())
-        .unwrap_or_else(|_| day.to_owned())
 }
 
 #[cfg(test)]
@@ -507,10 +491,6 @@ mod tests {
 
     #[test]
     fn figures_read_naturally() {
-        assert_eq!(day_label("2025-08-04"), "4 Aug 2025");
-        assert_eq!(day_label("soon"), "soon");
-        assert_eq!(plural(1, "day"), "1 day");
-        assert_eq!(plural(1204, "play"), "1,204 plays");
         assert_eq!(share_of(5, 0), 0.);
         assert_eq!(share_of(5, 10), 0.5);
     }

@@ -10,14 +10,14 @@ use gpui::{
     ParentElement, Render, SharedString, Styled, Subscription, Window, div, prelude::FluentBuilder,
     px,
 };
-use gpui_component::{ActiveTheme, Icon, StyledExt, h_flex, v_flex};
+use gpui_component::{ActiveTheme, StyledExt, h_flex, v_flex};
 use gpui_kit_assets::IconName;
 
 use crate::actions::OpenArtist;
 use crate::api::ApiClient;
 use crate::models::{Rendition, TrackHistory, album_rendition};
 use crate::state::track::TrackStore;
-use crate::views::artist::{body, is_spotify_id, months_card, open_in_spotify, stat_tiles};
+use crate::views::artist::{is_spotify_id, months_card, open_in_spotify, stat_tiles};
 use crate::views::{play_detail, widgets};
 
 pub struct TrackView {
@@ -75,19 +75,23 @@ impl Render for TrackView {
         let store = self.store.read(cx);
         let page = widgets::page("track").track_focus(&self.focus);
         let Some(id) = store.id.clone() else {
-            return page.child(div().h(px(360.)).child(widgets::state_panel(
-                Some(Icon::new(IconName::Music)),
+            return page.child(widgets::page_state(
+                Some(IconName::Music),
                 "No song selected",
                 Some("Open a song from History, a ranking or an artist's page.".into()),
-                None,
                 cx,
-            )));
+            ));
         };
         let refreshing = store.history.loading && store.history.data.is_some();
         page.child(header(store.history.data.as_ref(), &id, refreshing, cx))
-            .child(body(&store.history, "track-retry", retry, cx, |data| {
-                render_history(data, cx)
-            }))
+            .child(widgets::page_body(
+                "track-retry",
+                &store.history,
+                "Loading song…",
+                retry,
+                cx,
+                |data| render_history(data, cx),
+            ))
     }
 }
 
@@ -148,16 +152,12 @@ fn render_history(data: &TrackHistory, cx: &App) -> AnyElement {
         } else {
             "The warehouse has no plays of this song."
         };
-        return div()
-            .h(px(320.))
-            .child(widgets::state_panel(
-                Some(Icon::new(IconName::Inbox)),
-                "No plays for this song",
-                Some(detail.into()),
-                None,
-                cx,
-            ))
-            .into_any_element();
+        return widgets::page_state(
+            Some(IconName::Inbox),
+            "No plays for this song",
+            Some(detail.into()),
+            cx,
+        );
     }
     v_flex()
         .gap_4()

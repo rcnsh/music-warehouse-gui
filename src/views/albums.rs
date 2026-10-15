@@ -2,7 +2,6 @@
 //! time and per year. Every year arrives in the one response, so the year
 //! tabs switch without a request.
 
-use chrono::{DateTime, Local, NaiveDate, TimeZone};
 use gpui::AppContext as _;
 use gpui::{
     AnyElement, App, Context, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement,
@@ -10,7 +9,6 @@ use gpui::{
     px,
 };
 use gpui_component::{
-    Icon,
     tab::{Tab, TabBar},
     v_flex,
 };
@@ -100,31 +98,6 @@ fn selection(data: &TopAlbums, tab: usize) -> Selection<'_> {
     }
 }
 
-/// `2017-07` to `2026-10` as `Jul 2017 – Oct 2026`, or one month alone.
-fn month_span(from: &str, to: &str) -> String {
-    if from == to || to.is_empty() {
-        widgets::month_label(from)
-    } else {
-        format!(
-            "{} – {}",
-            widgets::month_label(from),
-            widgets::month_label(to)
-        )
-    }
-}
-
-/// The local calendar date of a stats `as_of` instant, in `tz`.
-fn local_date_in<Tz: TimeZone>(as_of: &str, tz: &Tz) -> Option<NaiveDate> {
-    DateTime::parse_from_rfc3339(as_of)
-        .ok()
-        .map(|t| t.with_timezone(tz).date_naive())
-}
-
-/// `as_of` as a short local date, `12 Oct 2026`. The stats pages share this.
-pub fn as_of_label(as_of: &str) -> Option<String> {
-    local_date_in(as_of, &Local).map(|d| d.format("%-d %b %Y").to_string())
-}
-
 fn album_rows(albums: &[TopAlbum], cx: &App) -> AnyElement {
     let top = albums.first().map(|a| a.plays).unwrap_or(0).max(1) as f32;
     v_flex()
@@ -134,7 +107,7 @@ fn album_rows(albums: &[TopAlbum], cx: &App) -> AnyElement {
                 "{} · {} songs · {}",
                 album.artist,
                 album.songs,
-                month_span(&album.from, &album.to)
+                widgets::month_span(&album.from, Some(&album.to))
             );
             widgets::RankedRow::new(("album", i), album.name.clone())
                 .rank(i + 1)
@@ -161,7 +134,7 @@ impl Render for AlbumsView {
                 "Albums with at least {} different songs played",
                 d.min_songs
             );
-            if let Some(date) = as_of_label(&d.as_of) {
+            if let Some(date) = widgets::local_day(&d.as_of) {
                 text.push_str(&format!(" · plays before {date}"));
             }
             SharedString::from(text)
@@ -179,7 +152,7 @@ impl Render for AlbumsView {
                 .on_click(on_tab)
                 .into_any_element()
         });
-        let body = widgets::remote_view(
+        let body = widgets::page_body(
             "albums-retry",
             &store.albums,
             "Loading top albums…",
@@ -188,8 +161,8 @@ impl Render for AlbumsView {
             |data| {
                 let selected = selection(data, tab);
                 if selected.albums.is_empty() {
-                    return widgets::state_panel(
-                        Some(Icon::new(IconName::Inbox)),
+                    return widgets::page_state(
+                        Some(IconName::Inbox),
                         "No albums yet",
                         Some(
                             format!(
@@ -198,10 +171,8 @@ impl Render for AlbumsView {
                             )
                             .into(),
                         ),
-                        None,
                         cx,
-                    )
-                    .into_any_element();
+                    );
                 }
                 let detail = if selected.partial {
                     format!("{} so far", selected.label)
@@ -219,19 +190,17 @@ impl Render for AlbumsView {
                     .into_any_element()
             },
         );
-        let filled = data.is_some();
         widgets::page("albums")
             .track_focus(&self.focus)
             .child(widgets::page_header("Top Albums", subtitle, None, cx))
             .when_some(tabs, |this, tabs| this.child(div().child(tabs)))
-            .child(div().when(!filled, |this| this.h(px(320.))).child(body))
+            .child(body)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::{FixedOffset, Utc};
 
     fn fixture() -> TopAlbums {
         serde_json::from_str(include_str!("../../tests/fixtures/stats-albums.json")).unwrap()
@@ -258,27 +227,5 @@ mod tests {
         let fallback = selection(&data, 99);
         assert_eq!(fallback.label.as_ref(), "All time");
         assert!(!fallback.partial);
-    }
-
-    #[test]
-    fn spans_read_as_months() {
-        assert_eq!(month_span("2017-07", "2026-10"), "Jul 2017 – Oct 2026");
-        assert_eq!(month_span("2026-10", "2026-10"), "Oct 2026");
-    }
-
-    #[test]
-    fn as_of_is_read_in_local_time() {
-        let singapore = FixedOffset::east_opt(8 * 3600).unwrap();
-        // Local midnight in Singapore is 16:00 UTC the day before.
-        let as_of = "2026-10-14T16:00:00.000Z";
-        assert_eq!(
-            local_date_in(as_of, &singapore),
-            NaiveDate::from_ymd_opt(2026, 10, 15)
-        );
-        assert_eq!(
-            local_date_in(as_of, &Utc),
-            NaiveDate::from_ymd_opt(2026, 10, 14)
-        );
-        assert_eq!(local_date_in("not a date", &Utc), None);
     }
 }

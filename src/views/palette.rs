@@ -21,9 +21,9 @@ use crate::appearance::Appearance;
 use crate::dates::RangePreset;
 use crate::models::{SearchArtist, SearchTrack, artist_key};
 use crate::runtime;
-use crate::views::history::group;
 use crate::views::nav::{Page, Section};
 use crate::views::shell::Shell;
+use crate::views::widgets;
 
 /// How long typing pauses before the query goes to the Worker, so a name
 /// typed at a normal pace costs one search rather than one per letter.
@@ -171,7 +171,7 @@ impl PaletteSearch {
 fn plays_label(plays: u32) -> String {
     match plays {
         1 => "1 play".to_owned(),
-        n => format!("{} plays", group(n as usize)),
+        n => format!("{} plays", widgets::count(n.into())),
     }
 }
 

@@ -9,14 +9,13 @@ use gpui::{
     IntoElement, ParentElement, Render, SharedString, Styled, Subscription, Window, div,
     prelude::FluentBuilder, px, relative,
 };
-use gpui_component::{ActiveTheme, Icon, h_flex, v_flex};
+use gpui_component::{ActiveTheme, h_flex, v_flex};
 use gpui_kit_assets::IconName;
 
 use crate::actions::OpenArtist;
 use crate::api::ApiClient;
 use crate::models::{ArtistShare, Eras, MonthSpan, ShareChange, TypicalChange};
 use crate::state::eras::ErasStore;
-use crate::views::rhythm::{page_body, span_label};
 use crate::views::widgets;
 
 pub struct ErasView {
@@ -64,7 +63,7 @@ impl Render for ErasView {
         let retry = cx.listener(|this, _, _, cx| this.refresh(cx));
         let store = self.store.read(cx);
         let subtitle = store.eras.data.as_ref().and_then(subtitle);
-        let body = page_body(
+        let body = widgets::page_body(
             "eras-retry",
             &store.eras,
             "Loading eras…",
@@ -104,16 +103,7 @@ fn subtitle(data: &Eras) -> Option<SharedString> {
 }
 
 fn explain(title: &'static str, detail: String, cx: &App) -> AnyElement {
-    div()
-        .h(px(360.))
-        .child(widgets::state_panel(
-            Some(Icon::new(IconName::Info)),
-            title,
-            Some(detail.into()),
-            None,
-            cx,
-        ))
-        .into_any_element()
+    widgets::page_state(Some(IconName::Info), title, Some(detail.into()), cx)
 }
 
 #[derive(Debug, PartialEq)]
@@ -149,7 +139,7 @@ fn too_early_detail(data: &Eras) -> String {
 }
 
 fn period(span: Option<&MonthSpan>) -> String {
-    span.map(|s| span_label(&s.from, Some(&s.to)))
+    span.map(|s| widgets::month_span(&s.from, Some(&s.to)))
         .unwrap_or_default()
 }
 

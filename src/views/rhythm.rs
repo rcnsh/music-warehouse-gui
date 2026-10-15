@@ -4,9 +4,9 @@
 
 use gpui::AppContext as _;
 use gpui::{
-    AnyElement, App, ClickEvent, Context, ElementId, Entity, FocusHandle, Focusable,
-    InteractiveElement, IntoElement, ParentElement, Render, SharedString, Styled, Subscription,
-    Window, div, prelude::FluentBuilder, px,
+    AnyElement, App, Context, ElementId, Entity, FocusHandle, Focusable, InteractiveElement,
+    IntoElement, ParentElement, Render, SharedString, Styled, Subscription, Window, div,
+    prelude::FluentBuilder, px,
 };
 use gpui_component::{
     ActiveTheme, Selectable, Sizable,
@@ -16,7 +16,6 @@ use gpui_component::{
 
 use crate::api::ApiClient;
 use crate::models::{EraRhythm, Rhythm, Streak, StreakSet};
-use crate::state::Remote;
 use crate::state::rhythm::RhythmStore;
 use crate::views::widgets;
 
@@ -101,13 +100,13 @@ impl Render for RhythmView {
         let subtitle = data.map(|d| {
             SharedString::from(format!(
                 "{}, in each era's local time. Updated weekly.",
-                span_label(&d.range.from, Some(&d.range.to))
+                widgets::month_span(&d.range.from, Some(&d.range.to))
             ))
         });
         let controls = data
             .filter(|d| !d.years.is_empty())
             .map(|d| self.year_picker(d, cx));
-        let body = page_body(
+        let body = widgets::page_body(
             "rhythm-retry",
             &store.rhythm,
             "Loading listening rhythm…",
@@ -120,13 +119,12 @@ impl Render for RhythmView {
                     .child(streaks_section(streaks, cx))
                     .children(eras.iter().map(|era| era_section(era, eras.len(), cx)))
                     .when(eras.is_empty(), |this| {
-                        this.child(div().h(px(200.)).child(widgets::state_panel(
+                        this.child(widgets::page_state(
                             None,
                             "No listening in this period",
                             None,
-                            None,
                             cx,
-                        )))
+                        ))
                     })
                     .into_any_element()
             },
@@ -235,7 +233,7 @@ fn streak_length(streak: &Streak) -> String {
 }
 
 fn streak_span(streak: &Streak) -> String {
-    span_label(
+    widgets::month_span(
         &streak.from,
         (!streak.running).then_some(streak.to.as_str()),
     )
@@ -246,27 +244,13 @@ fn approx_days(streak: &Streak) -> u32 {
     streak.days.unwrap_or(streak.weeks * 7)
 }
 
-/// `Feb 2024 – Jun 2024`, `Feb 2024` for one month, `Sep 2026 – now` while
-/// still running. Months are `YYYY-MM`.
-pub(crate) fn span_label(from: &str, to: Option<&str>) -> String {
-    match to {
-        None => format!("{} – now", widgets::month_label(from)),
-        Some(to) if to == from => widgets::month_label(from),
-        Some(to) => format!(
-            "{} – {}",
-            widgets::month_label(from),
-            widgets::month_label(to)
-        ),
-    }
-}
-
 fn era_section(era: &EraRhythm, eras: usize, cx: &App) -> impl IntoElement {
     let title = if eras > 1 {
         era.label.clone()
     } else {
         "When you listen".into()
     };
-    let span = span_label(&era.from, era.to.as_deref());
+    let span = widgets::month_span(&era.from, era.to.as_deref());
     v_flex()
         .gap_3()
         .child(widgets::section_heading(title, Some(span.into()), cx))
@@ -292,12 +276,9 @@ fn era_section(era: &EraRhythm, eras: usize, cx: &App) -> impl IntoElement {
         )
 }
 
+/// Each hour's share of plays, in percent.
 fn hour_points(shares: &[f64]) -> Vec<(SharedString, f64)> {
-    shares
-        .iter()
-        .enumerate()
-        .map(|(hour, share)| (format!("{hour:02}").into(), share * 100.))
-        .collect()
+    widgets::hour_points(shares.iter().map(|share| share * 100.))
 }
 
 /// Why a figure is missing: the Worker holds each back until an era has
@@ -310,14 +291,8 @@ fn not_yet(available_from: Option<&str>, cx: &App) -> AnyElement {
         ),
         None => "Too few days in this period to show a routine.".into(),
     };
-    div()
-        .text_sm()
-        .text_color(cx.theme().muted_foreground)
-        .child(text)
-        .into_any_element()
+    widgets::note(text, cx).into_any_element()
 }
-
-const WEEKDAYS: [&str; 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 /// Each cell's strength, 0–1, relative to the busiest cell, so the pattern
 /// shows whatever the total.
@@ -351,59 +326,30 @@ fn heatmap(grid: &[Vec<f64>], cx: &App) -> impl IntoElement {
     v_flex()
         .gap(px(2.))
         .child(hour_labels)
-        .children(levels.into_iter().zip(WEEKDAYS).map(move |(row, day)| {
-            h_flex()
-                .gap(px(2.))
-                .child(
-                    div()
-                        .w(label_w)
-                        .flex_shrink_0()
-                        .text_xs()
-                        .text_color(muted)
-                        .child(day),
-                )
-                .children(row.into_iter().map(move |level| {
-                    div().flex_1().h(px(18.)).rounded_sm().bg(if level > 0. {
-                        accent.opacity(0.12 + 0.88 * level)
-                    } else {
-                        empty
-                    })
-                }))
-        }))
-}
-
-/// Like [`widgets::remote_view`], but for content in a scrolling page: the
-/// loading and error panels get a fixed height to centre in, and loaded
-/// content keeps its natural height (with the retry banner above it when a
-/// refresh failed) instead of being squeezed to fill the page.
-pub(crate) fn page_body<T>(
-    id: impl Into<ElementId>,
-    remote: &Remote<T>,
-    loading_label: impl Into<SharedString>,
-    on_retry: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    cx: &App,
-    content: impl FnOnce(&T) -> AnyElement,
-) -> AnyElement {
-    match (&remote.data, &remote.error) {
-        (Some(data), error) => v_flex()
-            .gap_3()
-            .when_some(error.as_ref(), |this, error| {
-                this.child(widgets::error_banner(id, error, on_retry, cx))
-            })
-            .child(content(data))
-            .into_any_element(),
-        (None, _) => div()
-            .h(px(360.))
-            .child(widgets::remote_view(
-                id,
-                remote,
-                loading_label,
-                on_retry,
-                cx,
-                |_| div().into_any_element(),
-            ))
-            .into_any_element(),
-    }
+        .children(
+            levels
+                .into_iter()
+                .zip(widgets::WEEKDAYS)
+                .map(move |(row, day)| {
+                    h_flex()
+                        .gap(px(2.))
+                        .child(
+                            div()
+                                .w(label_w)
+                                .flex_shrink_0()
+                                .text_xs()
+                                .text_color(muted)
+                                .child(day),
+                        )
+                        .children(row.into_iter().map(move |level| {
+                            div().flex_1().h(px(18.)).rounded_sm().bg(if level > 0. {
+                                accent.opacity(0.12 + 0.88 * level)
+                            } else {
+                                empty
+                            })
+                        }))
+                }),
+        )
 }
 
 #[cfg(test)]
@@ -456,7 +402,6 @@ mod tests {
         assert_eq!(streak_length(&running), "2 weeks so far");
         assert_eq!(streak_span(&running), "Sep 2026 – now");
         assert_eq!(approx_days(&running), 14);
-        assert_eq!(span_label("2024-02", Some("2024-02")), "Feb 2024");
         assert_eq!(threshold_label(1), "Any listening");
         assert_eq!(threshold_label(25), "25+ plays a day");
     }
