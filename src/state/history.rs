@@ -74,18 +74,45 @@ impl PlayLog {
     }
 }
 
+/// Case-insensitive match against the three text columns a person would
+/// remember a play by: the same columns the Worker's `q` searches.
+pub fn matches_filter(play: &Play, needle_lower: &str) -> bool {
+    [&play.track_name, &play.artists, &play.album_name]
+        .into_iter()
+        .flatten()
+        .any(|field| field.to_lowercase().contains(needle_lower))
+}
+
+/// One list of plays being paged from the Worker, with its request state.
+#[derive(Default)]
+struct Feed {
+    log: PlayLog,
+    loading: bool,
+    error: Option<ApiError>,
+    /// Replacing or dropping the feed cancels its in-flight page, so a stale
+    /// response cannot append to a newer list.
+    _task: Option<Task<()>>,
+}
+
+/// A filter the Worker answers over the whole history (`q`), paged like the
+/// unfiltered list.
+struct Search {
+    query: String,
+    feed: Feed,
+}
+
 /// Stored play history, extended page by page with `before`. Reads only
 /// stored rows, so it keeps working when the Spotify grant is dead.
 pub struct HistoryStore {
     client: ApiClient,
-    log: PlayLog,
+    main: Feed,
+    /// While set, every accessor reads the search results instead of `main`,
+    /// which stays loaded so clearing the filter is instant.
+    search: Option<Search>,
     /// The day History was jumped to, if any. While set, the list starts at
     /// the end of that day instead of the newest play, and live updates pause
     /// because newer plays would not join up with the loaded rows.
     anchor: Option<NaiveDate>,
-    loading: bool,
-    error: Option<ApiError>,
-    _task: Option<Task<()>>,
     _newer_task: Option<Task<()>>,
 }
 
@@ -93,47 +120,75 @@ impl HistoryStore {
     pub fn new(client: ApiClient, cx: &mut Context<Self>) -> Self {
         let mut store = Self {
             client,
-            log: PlayLog::default(),
+            main: Feed::default(),
+            search: None,
             anchor: None,
-            loading: false,
-            error: None,
-            _task: None,
             _newer_task: None,
         };
         store.fetch(None, cx);
         store
     }
 
+    fn feed(&self) -> &Feed {
+        self.search.as_ref().map_or(&self.main, |s| &s.feed)
+    }
+
+    fn feed_mut(&mut self) -> &mut Feed {
+        match &mut self.search {
+            Some(search) => &mut search.feed,
+            None => &mut self.main,
+        }
+    }
+
     pub fn plays(&self) -> &[Play] {
-        self.log.plays()
+        self.feed().log.plays()
     }
 
     pub fn is_loading(&self) -> bool {
-        self.loading
+        self.feed().loading
     }
 
     pub fn error(&self) -> Option<&ApiError> {
-        self.error.as_ref()
+        self.feed().error.as_ref()
     }
 
     pub fn has_more(&self) -> bool {
-        !self.log.is_exhausted()
+        !self.feed().log.is_exhausted()
     }
 
     pub fn anchor(&self) -> Option<NaiveDate> {
         self.anchor
     }
 
+    pub fn query(&self) -> Option<&str> {
+        self.search.as_ref().map(|s| s.query.as_str())
+    }
+
+    /// Shows plays matching `query` from across the whole history, or the
+    /// unfiltered list again when it is empty.
+    pub fn set_query(&mut self, query: &str, cx: &mut Context<Self>) {
+        if self.query().unwrap_or_default() == query {
+            return;
+        }
+        self.search = (!query.is_empty()).then(|| Search {
+            query: query.to_owned(),
+            feed: Feed::default(),
+        });
+        if self.search.is_some() {
+            self.fetch(self.anchor_before(), cx);
+        }
+        cx.notify();
+    }
+
     /// Reloads what is on screen: from the newest play, or from the end of
-    /// the jumped-to day. Replacing the task cancels any in-flight page, so a
-    /// stale response cannot append to the new list.
+    /// the jumped-to day.
     pub fn refresh(&mut self, cx: &mut Context<Self>) {
-        self.reload(self.anchor_before(), cx);
+        self.reload(cx);
     }
 
     pub fn show_newest(&mut self, cx: &mut Context<Self>) {
         self.anchor = None;
-        self.reload(None, cx);
+        self.reload(cx);
     }
 
     /// Shows plays from the end of `day` (local time) backwards, using the
@@ -145,24 +200,38 @@ impl HistoryStore {
             return self.show_newest(cx);
         }
         self.anchor = Some(day);
-        self.reload(dates::end_of_local_day_ms(day, &chrono::Local), cx);
+        self.reload(cx);
     }
 
-    fn reload(&mut self, before: Option<i64>, cx: &mut Context<Self>) {
-        self.log = PlayLog::default();
-        self.error = None;
+    /// Restarts the unfiltered list and any search from the anchor, so both
+    /// agree on where history starts.
+    fn reload(&mut self, cx: &mut Context<Self>) {
+        let before = self.anchor_before();
+        let search = self.search.take();
+        self.main = Feed::default();
         self._newer_task = None;
         self.fetch(before, cx);
+        if let Some(search) = search {
+            self.search = Some(Search {
+                query: search.query,
+                feed: Feed::default(),
+            });
+            self.fetch(before, cx);
+        }
     }
 
     /// Adds plays ingested since the newest loaded one. Cheap: the Worker
     /// reads only rows after the cursor, usually none. Skipped while jumped
-    /// to a day, loading, or failing.
+    /// to a day, searching, loading, or failing.
     pub fn check_newer(&mut self, cx: &mut Context<Self>) {
-        let Some(after) = self.log.newest_ms() else {
+        let Some(after) = self.main.log.newest_ms() else {
             return;
         };
-        if self.anchor.is_some() || self.loading || self.error.is_some() {
+        if self.anchor.is_some()
+            || self.search.is_some()
+            || self.main.loading
+            || self.main.error.is_some()
+        {
             return;
         }
         // One millisecond early: `after` is exclusive, and a second play
@@ -180,7 +249,7 @@ impl HistoryStore {
                 if page.is_empty() {
                     return;
                 }
-                match this.log.prepend_page(page, PAGE_SIZE) {
+                match this.main.log.prepend_page(page, PAGE_SIZE) {
                     Some(0) => {}
                     Some(_) => cx.notify(),
                     None => this.show_newest(cx),
@@ -194,17 +263,18 @@ impl HistoryStore {
     /// is in flight, after the last page, or after an error until the user
     /// retries, so scroll-driven calls cannot hammer a failing Worker.
     pub fn load_older(&mut self, cx: &mut Context<Self>) {
-        if self.loading || self.log.is_exhausted() || self.error.is_some() {
+        let feed = self.feed();
+        if feed.loading || feed.log.is_exhausted() || feed.error.is_some() {
             return;
         }
-        let before = self.log.next_before().or(self.anchor_before());
+        let before = feed.log.next_before().or(self.anchor_before());
         self.fetch(before, cx);
     }
 
     /// Clears an error and repeats the request that failed.
     pub fn retry(&mut self, cx: &mut Context<Self>) {
-        self.error = None;
-        let before = self.log.next_before().or(self.anchor_before());
+        self.feed_mut().error = None;
+        let before = self.feed().log.next_before().or(self.anchor_before());
         self.fetch(before, cx);
     }
 
@@ -213,22 +283,53 @@ impl HistoryStore {
             .and_then(|day| dates::end_of_local_day_ms(day, &chrono::Local))
     }
 
+    /// Fetches the next page of whichever list is showing.
     fn fetch(&mut self, before: Option<i64>, cx: &mut Context<Self>) {
-        self.loading = true;
-        cx.notify();
+        let query = self.query().map(str::to_owned);
         let client = self.client.clone();
-        self._task = Some(cx.spawn(async move |this, cx| {
-            let result = runtime::run(async move { client.plays(PAGE_SIZE, before).await }).await;
+        let task = cx.spawn(async move |this, cx| {
+            let q = query.clone();
+            let result =
+                runtime::run(async move { client.plays(PAGE_SIZE, before, q.as_deref()).await })
+                    .await;
             this.update(cx, |this, cx| {
-                this.loading = false;
-                match result {
-                    Ok(page) => this.log.append_page(page, PAGE_SIZE),
-                    Err(error) => this.error = Some(error),
+                // The task belongs to its feed, so a feed that was replaced
+                // never sees this; one that is still here is the right one.
+                let feed = match (&query, &mut this.search) {
+                    (None, _) => &mut this.main,
+                    (Some(_), Some(search)) => &mut search.feed,
+                    (Some(_), None) => return,
+                };
+                feed.loading = false;
+                match result.and_then(|page| check_search_page(page, query.as_deref())) {
+                    Ok(page) => feed.log.append_page(page, PAGE_SIZE),
+                    Err(error) => feed.error = Some(error),
                 }
                 cx.notify();
             })
             .ok();
-        }));
+        });
+        let feed = self.feed_mut();
+        feed.loading = true;
+        feed._task = Some(task);
+        cx.notify();
+    }
+}
+
+/// A Worker older than `q` ignores it and returns the unfiltered list, which
+/// would look like a filter that matches everything. Every row the Worker
+/// matches also passes the local filter (its ASCII-only case folding finds a
+/// subset of what Unicode lowercasing finds), so one row that fails means
+/// `q` was not applied.
+fn check_search_page(page: Vec<Play>, query: Option<&str>) -> Result<Vec<Play>, ApiError> {
+    let Some(query) = query else { return Ok(page) };
+    let needle = query.to_lowercase();
+    if page.iter().all(|play| matches_filter(play, &needle)) {
+        Ok(page)
+    } else {
+        Err(ApiError::Decode(
+            "this Worker cannot search history. Deploy the latest music-warehouse.".into(),
+        ))
     }
 }
 
@@ -309,5 +410,48 @@ mod tests {
     #[test]
     fn empty_log_starts_from_newest() {
         assert_eq!(PlayLog::default().next_before(), None);
+    }
+
+    fn named(track: Option<&str>, artists: Option<&str>, album: Option<&str>) -> Play {
+        Play {
+            track_name: track.map(Into::into),
+            artists: artists.map(Into::into),
+            album_name: album.map(Into::into),
+            ..play(0, "t")
+        }
+    }
+
+    #[test]
+    fn filter_matches_any_text_column_case_insensitively() {
+        let p = named(
+            Some("Rich Spirit"),
+            Some("Kendrick Lamar"),
+            Some("Mr. Morale"),
+        );
+        assert!(matches_filter(&p, "spirit"));
+        assert!(matches_filter(&p, "kendrick"));
+        assert!(matches_filter(&p, "morale"));
+        assert!(!matches_filter(&p, "drake"));
+    }
+
+    #[test]
+    fn filter_tolerates_export_rows_without_album() {
+        let p = named(Some("211"), Some("Rukkus"), None);
+        assert!(matches_filter(&p, "rukkus"));
+        assert!(!matches_filter(&p, "album"));
+    }
+
+    #[test]
+    fn search_page_that_ignored_q_is_an_error() {
+        let page = vec![
+            named(Some("Divinity"), Some("Porter Robinson"), None),
+            named(Some("Rich Spirit"), Some("Kendrick Lamar"), None),
+        ];
+        assert!(check_search_page(page.clone(), None).is_ok());
+        assert!(check_search_page(page[..1].to_vec(), Some("DIVINITY")).is_ok());
+        assert!(matches!(
+            check_search_page(page, Some("divinity")),
+            Err(ApiError::Decode(_))
+        ));
     }
 }

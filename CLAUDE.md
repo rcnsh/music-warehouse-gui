@@ -143,8 +143,9 @@ unrecognised URL passes through unchanged.
 The server computes; the client stays thin. Do not recompute aggregates the
 API already provides (daily counts, artist counts, rankings). If a view needs
 data the API does not have, stop and propose a new Worker endpoint instead of
-fetching everything and aggregating client-side. The History filter only
-searches loaded rows, and paging pauses while it is active for this reason.
+fetching everything and aggregating client-side. The History search is the
+example: it once filtered only loaded rows, and now sends `q` to
+`/api/plays` so the Worker matches across the whole history.
 
 ## Layout
 

@@ -1,8 +1,10 @@
+use std::time::Duration;
+
 use gpui::AppContext as _;
 use gpui::{
     App, ClipboardItem, Context, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement,
-    ParentElement, Render, SharedString, Styled, Subscription, Window, div, prelude::FluentBuilder,
-    px,
+    ParentElement, Render, SharedString, Styled, Subscription, Task, Window, div,
+    prelude::FluentBuilder, px,
 };
 use gpui_component::{
     ActiveTheme, Icon, Sizable, WindowExt,
@@ -19,7 +21,7 @@ use crate::actions::{CopyPlay, OpenInSpotify};
 use crate::api::ApiClient;
 use crate::dates;
 use crate::models::{Play, Rendition, album_rendition};
-use crate::state::history::{HistoryStore, PAGE_SIZE};
+use crate::state::history::HistoryStore;
 use crate::views::{play_detail, widgets};
 
 const COL_ART: usize = 0;
@@ -27,37 +29,21 @@ const COL_TIME: usize = 1;
 const COL_TRACK: usize = 2;
 const COL_ARTIST: usize = 3;
 
-/// Case-insensitive match against the three text columns a person would
-/// remember a play by.
-pub fn matches_filter(play: &Play, needle_lower: &str) -> bool {
-    [&play.track_name, &play.artists, &play.album_name]
-        .into_iter()
-        .flatten()
-        .any(|field| field.to_lowercase().contains(needle_lower))
-}
+/// How long typing has to pause before the filter goes to the Worker, so a
+/// word typed quickly costs one search rather than one per letter.
+const SEARCH_AFTER: Duration = Duration::from_millis(300);
 
-/// Table rows are indices into the store's plays, so filtering never copies
-/// rows and the store stays the single owner of fetched data.
+/// Table rows are indices into the store's plays, so the store stays the
+/// single owner of fetched data. The Worker does the filtering (`q`), so
+/// every loaded row is shown.
 pub struct PlaysTable {
     store: Entity<HistoryStore>,
     rows: Vec<usize>,
-    filter: String,
 }
 
 impl PlaysTable {
     fn rebuild(&mut self, cx: &App) {
-        let plays = self.store.read(cx).plays();
-        let needle = self.filter.to_lowercase();
-        self.rows = if needle.is_empty() {
-            (0..plays.len()).collect()
-        } else {
-            plays
-                .iter()
-                .enumerate()
-                .filter(|(_, play)| matches_filter(play, &needle))
-                .map(|(ix, _)| ix)
-                .collect()
-        };
+        self.rows = (0..self.store.read(cx).plays().len()).collect();
     }
 
     fn play<'a>(&self, row_ix: usize, cx: &'a App) -> Option<&'a Play> {
@@ -140,11 +126,9 @@ impl TableDelegate for PlaysTable {
         store.is_loading() && store.plays().is_empty()
     }
 
-    /// Paging stops while filtering: a filter that matches little would
-    /// otherwise keep the table "near the bottom" and walk the whole history.
     fn has_more(&self, cx: &App) -> bool {
         let store = self.store.read(cx);
-        self.filter.is_empty() && store.has_more() && !store.is_loading() && store.error().is_none()
+        store.has_more() && !store.is_loading() && store.error().is_none()
     }
 
     fn load_more_threshold(&self) -> usize {
@@ -160,7 +144,8 @@ impl TableDelegate for PlaysTable {
         _: &mut Window,
         cx: &mut Context<TableState<Self>>,
     ) -> impl IntoElement {
-        if self.filter.is_empty() {
+        let store = self.store.read(cx);
+        let Some(query) = store.query().map(str::to_owned) else {
             return widgets::state_panel(
                 Some(Icon::new(IconName::Inbox)),
                 "No plays stored yet",
@@ -169,11 +154,15 @@ impl TableDelegate for PlaysTable {
                 cx,
             )
             .into_any_element();
-        }
+        };
+        let scope = match store.anchor() {
+            Some(day) => format!("Searched every play up to {}.", day.format("%-d %b %Y")),
+            None => "Searched every stored play.".to_owned(),
+        };
         widgets::state_panel(
             Some(Icon::new(IconName::Search)),
-            format!("No loaded plays match “{}”", self.filter),
-            Some("The filter only searches plays already loaded in this window.".into()),
+            format!("No plays match “{query}”"),
+            Some(format!("{scope} Track, artist and album names are matched.").into()),
             None,
             cx,
         )
@@ -194,6 +183,7 @@ pub struct HistoryView {
     filter: Entity<InputState>,
     jump: Entity<InputState>,
     jump_error: Option<SharedString>,
+    _search_debounce: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -203,7 +193,6 @@ impl HistoryView {
         let delegate = PlaysTable {
             store: store.clone(),
             rows: Vec::new(),
-            filter: String::new(),
         };
         let table = cx.new(|cx| {
             TableState::new(delegate, window, cx)
@@ -212,7 +201,7 @@ impl HistoryView {
                 .sortable(false)
         });
         let filter = cx.new(|cx| {
-            InputState::new(window, cx).placeholder("Filter loaded plays by track, artist or album")
+            InputState::new(window, cx).placeholder("Search all plays by track, artist or album")
         });
 
         let jump = cx.new(|cx| InputState::new(window, cx).placeholder("Go to date"));
@@ -234,6 +223,7 @@ impl HistoryView {
             filter,
             jump,
             jump_error: None,
+            _search_debounce: None,
             _subscriptions: subscriptions,
         }
     }
@@ -331,20 +321,29 @@ impl HistoryView {
         match event {
             InputEvent::Change => {
                 let text = input.read(cx).value().trim().to_owned();
-                self.table.update(cx, |table, cx| {
-                    table.delegate_mut().filter = text;
-                    table.delegate_mut().rebuild(cx);
-                    // Row indices now point into a different list.
-                    table.clear_selection(cx);
-                    table.scroll_to_row(0, cx);
-                    cx.notify();
-                });
-                cx.notify();
+                // Clearing needs no request, so it should not wait.
+                if text.is_empty() {
+                    self._search_debounce = None;
+                    return self.search(&text, cx);
+                }
+                self._search_debounce = Some(cx.spawn(async move |this, cx| {
+                    cx.background_executor().timer(SEARCH_AFTER).await;
+                    this.update(cx, |this, cx| this.search(&text, cx)).ok();
+                }));
             }
             // Enter hands the keyboard to the results, where j/k take over.
             InputEvent::PressEnter { .. } => self.focus_table(window, cx),
             _ => {}
         }
+    }
+
+    fn search(&mut self, query: &str, cx: &mut Context<Self>) {
+        if self.store.read(cx).query().unwrap_or_default() == query {
+            return;
+        }
+        self.store
+            .update(cx, |store, cx| store.set_query(query, cx));
+        self.reset_table(cx);
     }
 
     fn selected_play(&self, cx: &App) -> Option<Play> {
@@ -397,28 +396,24 @@ impl HistoryView {
     fn status_text(&self, cx: &App) -> SharedString {
         let store = self.store.read(cx);
         let loaded = store.plays().len();
-        let filter = &self.table.read(cx).delegate().filter;
-        let shown = self.table.read(cx).delegate().rows.len();
-        if !filter.is_empty() {
-            return format!(
-                "{} of {} loaded plays match. The filter only searches loaded rows.",
-                group(shown),
-                group(loaded)
-            )
-            .into();
-        }
         let prefix = match store.anchor() {
             Some(day) => format!("From {} back · ", day.format("%a %-d %b %Y")),
             None => String::new(),
         };
+        let (noun, all) = match store.query() {
+            Some(_) => ("matching plays", "matching"),
+            None => ("plays", "stored"),
+        };
+        let n = group(loaded);
         let text = match (store.is_loading(), store.has_more()) {
-            (true, _) if loaded > 0 => format!("{} plays loaded · loading older…", group(loaded)),
+            (true, _) if loaded > 0 => format!("{n} {noun} loaded · loading older…"),
+            (true, _) if store.query().is_some() => "Searching…".to_owned(),
             (true, _) => "Loading…".to_owned(),
-            (false, true) => format!("{} plays loaded · scroll for older", group(loaded)),
+            (false, true) => format!("{n} {noun} loaded · scroll for older"),
             (false, false) if store.anchor().is_some() => {
-                format!("{} plays loaded · reached the oldest", group(loaded))
+                format!("{n} {noun} loaded · reached the oldest")
             }
-            (false, false) => format!("All {} stored plays loaded", group(loaded)),
+            (false, false) => format!("All {n} {all} plays loaded"),
         };
         format!("{prefix}{text}").into()
     }
@@ -435,8 +430,6 @@ impl Render for HistoryView {
         let store = self.store.read(cx);
         let error = store.error().cloned();
         let has_rows = !store.plays().is_empty();
-        let can_page_manually = store.has_more() && !store.is_loading() && error.is_none();
-        let filtering = !self.table.read(cx).delegate().filter.is_empty();
         let anchored = store.anchor().is_some();
         let retry = cx.listener(|this, _, _, cx| this.store.update(cx, |s, cx| s.retry(cx)));
 
@@ -496,7 +489,7 @@ impl Render for HistoryView {
                         div()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .child("⌘F filter · ⌘G date · j/k move"),
+                            .child("⌘F search · ⌘G date · j/k move"),
                     ),
             )
             .when_some(self.jump_error.clone(), |this, message| {
@@ -548,19 +541,6 @@ impl Render for HistoryView {
                                     this.back_to_newest(window, cx)
                                 })),
                         )
-                    })
-                    // Scrolling cannot page while a filter is active, so give
-                    // an explicit way to widen what the filter searches.
-                    .when(filtering && can_page_manually, |this| {
-                        this.child(
-                            Button::new("load-older")
-                                .xsmall()
-                                .ghost()
-                                .label(format!("Load {PAGE_SIZE} older"))
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.store.update(cx, |s, cx| s.load_older(cx))
-                                })),
-                        )
                     }),
             )
     }
@@ -582,41 +562,6 @@ pub fn group(n: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn play(track: Option<&str>, artists: Option<&str>, album: Option<&str>) -> Play {
-        Play {
-            played_at_ms: 0,
-            track_id: "t".into(),
-            context_uri: None,
-            context_type: None,
-            source: None,
-            track_name: track.map(Into::into),
-            duration_ms: None,
-            album_name: album.map(Into::into),
-            image_url: None,
-            artists: artists.map(Into::into),
-        }
-    }
-
-    #[test]
-    fn filter_matches_any_text_column_case_insensitively() {
-        let p = play(
-            Some("Rich Spirit"),
-            Some("Kendrick Lamar"),
-            Some("Mr. Morale"),
-        );
-        assert!(matches_filter(&p, "spirit"));
-        assert!(matches_filter(&p, "kendrick"));
-        assert!(matches_filter(&p, "morale"));
-        assert!(!matches_filter(&p, "drake"));
-    }
-
-    #[test]
-    fn filter_tolerates_export_rows_without_album() {
-        let p = play(Some("211"), Some("Rukkus"), None);
-        assert!(matches_filter(&p, "rukkus"));
-        assert!(!matches_filter(&p, "album"));
-    }
 
     #[test]
     fn grouping() {

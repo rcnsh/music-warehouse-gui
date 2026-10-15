@@ -217,12 +217,15 @@ impl ApiClient {
         decode(&body)
     }
 
-    /// Newest-first page of plays strictly older than `before_ms`.
-    pub async fn plays(&self, limit: u32, before_ms: Option<i64>) -> Result<Vec<Play>, ApiError> {
-        let mut query = vec![("limit", limit.to_string())];
-        if let Some(before) = before_ms {
-            query.push(("before", before.to_string()));
-        }
+    /// Newest-first page of plays strictly older than `before_ms`, limited
+    /// to those whose track, album or artist name contains `search`.
+    pub async fn plays(
+        &self,
+        limit: u32,
+        before_ms: Option<i64>,
+        search: Option<&str>,
+    ) -> Result<Vec<Play>, ApiError> {
+        let query = plays_query(limit, before_ms, search);
         let response: PlaysResponse = self.get(self.endpoint("plays", &query)).await?;
         Ok(response.plays)
     }
@@ -286,6 +289,21 @@ impl ApiClient {
         ];
         self.get(self.endpoint("top", &query)).await
     }
+}
+
+fn plays_query(
+    limit: u32,
+    before_ms: Option<i64>,
+    search: Option<&str>,
+) -> Vec<(&'static str, String)> {
+    let mut query = vec![("limit", limit.to_string())];
+    if let Some(before) = before_ms {
+        query.push(("before", before.to_string()));
+    }
+    if let Some(q) = search {
+        query.push(("q", q.to_owned()));
+    }
+    query
 }
 
 fn range_query(range: &DateRange, tz: &str) -> Vec<(&'static str, String)> {
@@ -455,6 +473,20 @@ mod tests {
         assert_eq!(
             prefixed.endpoint("now-playing", &[]).as_str(),
             "https://example.com/warehouse/api/now-playing"
+        );
+    }
+
+    #[test]
+    fn plays_search_is_encoded_into_q() {
+        let url = client().endpoint("plays", &plays_query(200, Some(17), Some("Sad & 100%")));
+        assert_eq!(
+            url.as_str(),
+            "https://music.example.com/api/plays?limit=200&before=17&q=Sad+%26+100%25"
+        );
+        let plain = client().endpoint("plays", &plays_query(50, None, None));
+        assert_eq!(
+            plain.as_str(),
+            "https://music.example.com/api/plays?limit=50"
         );
     }
 
