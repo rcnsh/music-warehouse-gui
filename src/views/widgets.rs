@@ -542,7 +542,15 @@ pub fn bar_chart(
         .fill(move |_, _, _, _| accent)
         .value_axis(true)
         .value_tick_count(4)
-        .value_tick_format(|v| format!("{v:.0}"))
+        // The zero line needs no label, and in the gutter it would touch
+        // the first band label below it.
+        .value_tick_format(|v| {
+            if v == 0. {
+                String::new()
+            } else {
+                format!("{v:.0}")
+            }
+        })
         .band_tick_count(bands.clamp(1, 8))
         .grid_dashed(false)
         .value_axis_label_placement(AxisLabelPlacement::Outside)
