@@ -10,6 +10,9 @@ with [GPUI](https://www.gpui.rs) and
 [gpui-component](https://github.com/longbridge/gpui-component). The app only
 displays data; the Worker does the polling, storage and aggregation.
 
+It is one of several clients of the warehouse; the
+[full list](https://github.com/rcnsh/music-warehouse#clients) is in its README.
+
 <!-- TODO: add screenshot/GIF at docs/screenshot.png -->
 <!-- ![Music Warehouse showing the History view](docs/screenshot.png) -->
 
