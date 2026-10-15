@@ -29,9 +29,24 @@ const COL_TIME: usize = 1;
 const COL_TRACK: usize = 2;
 const COL_ARTIST: usize = 3;
 
-/// How long typing has to pause before the filter goes to the Worker, so a
-/// word typed quickly costs one search rather than one per letter.
-const SEARCH_AFTER: Duration = Duration::from_millis(300);
+/// How long typing has to pause before the filter goes to the Worker. Every
+/// search sent costs Worker reads even if the user has typed on, so a word
+/// typed at a normal pace should cost one search, not one per letter.
+const SEARCH_AFTER: Duration = Duration::from_millis(450);
+
+/// One letter matches most of the history and can't use the Worker's name
+/// index, so a search waits for a second.
+const MIN_SEARCH_CHARS: usize = 2;
+
+/// The filter text to send to the Worker: empty to show everything, `None`
+/// while there is too little to search yet.
+fn searchable(text: &str) -> Option<&str> {
+    match text.chars().count() {
+        0 => Some(""),
+        n if n < MIN_SEARCH_CHARS => None,
+        _ => Some(text),
+    }
+}
 
 /// Table rows are indices into the store's plays, so the store stays the
 /// single owner of fetched data. The Worker does the filtering (`q`), so
@@ -183,6 +198,8 @@ pub struct HistoryView {
     filter: Entity<InputState>,
     jump: Entity<InputState>,
     jump_error: Option<SharedString>,
+    /// Set while the filter holds too little text to search.
+    filter_too_short: bool,
     _search_debounce: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
@@ -223,6 +240,7 @@ impl HistoryView {
             filter,
             jump,
             jump_error: None,
+            filter_too_short: false,
             _search_debounce: None,
             _subscriptions: subscriptions,
         }
@@ -321,18 +339,31 @@ impl HistoryView {
         match event {
             InputEvent::Change => {
                 let text = input.read(cx).value().trim().to_owned();
-                // Clearing needs no request, so it should not wait.
-                if text.is_empty() {
-                    self._search_debounce = None;
-                    return self.search(&text, cx);
+                self._search_debounce = None;
+                self.filter_too_short = searchable(&text).is_none();
+                match searchable(&text) {
+                    // Clearing, or too little to search yet: show everything, at
+                    // once, since that needs no request.
+                    Some("") | None => self.search("", cx),
+                    Some(_) => {
+                        self._search_debounce = Some(cx.spawn(async move |this, cx| {
+                            cx.background_executor().timer(SEARCH_AFTER).await;
+                            this.update(cx, |this, cx| this.search(&text, cx)).ok();
+                        }));
+                    }
                 }
-                self._search_debounce = Some(cx.spawn(async move |this, cx| {
-                    cx.background_executor().timer(SEARCH_AFTER).await;
-                    this.update(cx, |this, cx| this.search(&text, cx)).ok();
-                }));
+                cx.notify();
             }
-            // Enter hands the keyboard to the results, where j/k take over.
-            InputEvent::PressEnter { .. } => self.focus_table(window, cx),
+            // Enter searches at once rather than waiting out the pause, then
+            // hands the keyboard to the results, where j/k take over.
+            InputEvent::PressEnter { .. } => {
+                let text = input.read(cx).value().trim().to_owned();
+                if let Some(query) = searchable(&text) {
+                    self._search_debounce = None;
+                    self.search(query, cx);
+                }
+                self.focus_table(window, cx);
+            }
             _ => {}
         }
     }
@@ -396,10 +427,13 @@ impl HistoryView {
     fn status_text(&self, cx: &App) -> SharedString {
         let store = self.store.read(cx);
         let loaded = store.plays().len();
-        let prefix = match store.anchor() {
+        let mut prefix = match store.anchor() {
             Some(day) => format!("From {} back · ", day.format("%a %-d %b %Y")),
             None => String::new(),
         };
+        if self.filter_too_short {
+            prefix.insert_str(0, "Type 2 or more characters to search · ");
+        }
         let (noun, all) = match store.query() {
             Some(_) => ("matching plays", "matching"),
             None => ("plays", "stored"),
@@ -562,6 +596,15 @@ pub fn group(n: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn search_waits_for_two_characters() {
+        assert_eq!(searchable(""), Some(""));
+        assert_eq!(searchable("a"), None);
+        assert_eq!(searchable("é"), None);
+        assert_eq!(searchable("u2"), Some("u2"));
+        assert_eq!(searchable("divinity"), Some("divinity"));
+    }
 
     #[test]
     fn grouping() {

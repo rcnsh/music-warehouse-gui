@@ -37,6 +37,10 @@ pub struct Play {
 #[derive(Debug, Clone, Deserialize)]
 pub struct PlaysResponse {
     pub plays: Vec<Play>,
+    /// The search the Worker applied, echoed back. Absent on unfiltered pages
+    /// and from Workers older than search.
+    #[serde(default)]
+    pub q: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]

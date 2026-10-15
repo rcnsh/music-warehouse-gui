@@ -12,6 +12,11 @@ use crate::runtime;
 /// several times over while keeping each response small.
 pub const PAGE_SIZE: u32 = 200;
 
+/// Search pages are smaller: the Worker's cost per page grows with rows
+/// returned (names are joined per row, and a broad search walks further to
+/// fill a page), and a search is usually after one play near the top.
+pub const SEARCH_PAGE_SIZE: u32 = 100;
+
 /// Loaded plays, newest first, plus what is needed to ask for the next page.
 /// Plain data so the paging rules are testable without a GPUI app.
 #[derive(Debug, Default)]
@@ -72,15 +77,6 @@ impl PlayLog {
         // window forever.
         self.exhausted = !full_page || added == 0;
     }
-}
-
-/// Case-insensitive match against the three text columns a person would
-/// remember a play by: the same columns the Worker's `q` searches.
-pub fn matches_filter(play: &Play, needle_lower: &str) -> bool {
-    [&play.track_name, &play.artists, &play.album_name]
-        .into_iter()
-        .flatten()
-        .any(|field| field.to_lowercase().contains(needle_lower))
 }
 
 /// One list of plays being paged from the Worker, with its request state.
@@ -286,11 +282,16 @@ impl HistoryStore {
     /// Fetches the next page of whichever list is showing.
     fn fetch(&mut self, before: Option<i64>, cx: &mut Context<Self>) {
         let query = self.query().map(str::to_owned);
+        let page_size = if query.is_some() {
+            SEARCH_PAGE_SIZE
+        } else {
+            PAGE_SIZE
+        };
         let client = self.client.clone();
         let task = cx.spawn(async move |this, cx| {
             let q = query.clone();
             let result =
-                runtime::run(async move { client.plays(PAGE_SIZE, before, q.as_deref()).await })
+                runtime::run(async move { client.plays(page_size, before, q.as_deref()).await })
                     .await;
             this.update(cx, |this, cx| {
                 // The task belongs to its feed, so a feed that was replaced
@@ -301,8 +302,8 @@ impl HistoryStore {
                     (Some(_), None) => return,
                 };
                 feed.loading = false;
-                match result.and_then(|page| check_search_page(page, query.as_deref())) {
-                    Ok(page) => feed.log.append_page(page, PAGE_SIZE),
+                match result {
+                    Ok(page) => feed.log.append_page(page, page_size),
                     Err(error) => feed.error = Some(error),
                 }
                 cx.notify();
@@ -313,23 +314,6 @@ impl HistoryStore {
         feed.loading = true;
         feed._task = Some(task);
         cx.notify();
-    }
-}
-
-/// A Worker older than `q` ignores it and returns the unfiltered list, which
-/// would look like a filter that matches everything. Every row the Worker
-/// matches also passes the local filter (its ASCII-only case folding finds a
-/// subset of what Unicode lowercasing finds), so one row that fails means
-/// `q` was not applied.
-fn check_search_page(page: Vec<Play>, query: Option<&str>) -> Result<Vec<Play>, ApiError> {
-    let Some(query) = query else { return Ok(page) };
-    let needle = query.to_lowercase();
-    if page.iter().all(|play| matches_filter(play, &needle)) {
-        Ok(page)
-    } else {
-        Err(ApiError::Decode(
-            "this Worker cannot search history. Deploy the latest music-warehouse.".into(),
-        ))
     }
 }
 
@@ -410,48 +394,5 @@ mod tests {
     #[test]
     fn empty_log_starts_from_newest() {
         assert_eq!(PlayLog::default().next_before(), None);
-    }
-
-    fn named(track: Option<&str>, artists: Option<&str>, album: Option<&str>) -> Play {
-        Play {
-            track_name: track.map(Into::into),
-            artists: artists.map(Into::into),
-            album_name: album.map(Into::into),
-            ..play(0, "t")
-        }
-    }
-
-    #[test]
-    fn filter_matches_any_text_column_case_insensitively() {
-        let p = named(
-            Some("Rich Spirit"),
-            Some("Kendrick Lamar"),
-            Some("Mr. Morale"),
-        );
-        assert!(matches_filter(&p, "spirit"));
-        assert!(matches_filter(&p, "kendrick"));
-        assert!(matches_filter(&p, "morale"));
-        assert!(!matches_filter(&p, "drake"));
-    }
-
-    #[test]
-    fn filter_tolerates_export_rows_without_album() {
-        let p = named(Some("211"), Some("Rukkus"), None);
-        assert!(matches_filter(&p, "rukkus"));
-        assert!(!matches_filter(&p, "album"));
-    }
-
-    #[test]
-    fn search_page_that_ignored_q_is_an_error() {
-        let page = vec![
-            named(Some("Divinity"), Some("Porter Robinson"), None),
-            named(Some("Rich Spirit"), Some("Kendrick Lamar"), None),
-        ];
-        assert!(check_search_page(page.clone(), None).is_ok());
-        assert!(check_search_page(page[..1].to_vec(), Some("DIVINITY")).is_ok());
-        assert!(matches!(
-            check_search_page(page, Some("divinity")),
-            Err(ApiError::Decode(_))
-        ));
     }
 }

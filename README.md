@@ -17,7 +17,8 @@ displays data; the Worker does the polling, storage and aggregation.
 
 - **History** (⌘1): every stored play in local time with album art, loaded
   page by page as you scroll. ⌘F searches the whole history by track, artist
-  or album (needs a Worker with `q` on `/api/plays`), Enter moves to the list,
+  or album, ignoring case and accents, from two characters (needs a Worker
+  with `q` on `/api/plays`). Enter searches at once and moves to the list,
   j/k move. ⌘G jumps to a date. New plays appear at the top within five
   minutes of the Worker storing them, while the window is visible. Selecting a
   play shows its details; `o` opens it in Spotify and ⌘C copies it.

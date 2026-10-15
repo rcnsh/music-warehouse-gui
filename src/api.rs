@@ -227,6 +227,7 @@ impl ApiClient {
     ) -> Result<Vec<Play>, ApiError> {
         let query = plays_query(limit, before_ms, search);
         let response: PlaysResponse = self.get(self.endpoint("plays", &query)).await?;
+        check_search_applied(search, response.q.as_deref())?;
         Ok(response.plays)
     }
 
@@ -288,6 +289,18 @@ impl ApiClient {
             ("limit", limit.to_string()),
         ];
         self.get(self.endpoint("top", &query)).await
+    }
+}
+
+/// A Worker older than search ignores `q` and returns the unfiltered list,
+/// which would look like a filter that matches everything. Search responses
+/// echo `q`, so a missing or different echo means it was not applied.
+fn check_search_applied(sent: Option<&str>, echoed: Option<&str>) -> Result<(), ApiError> {
+    match sent {
+        Some(q) if echoed != Some(q) => Err(ApiError::Decode(
+            "this Worker cannot search history. Deploy the latest music-warehouse.".into(),
+        )),
+        _ => Ok(()),
     }
 }
 
@@ -474,6 +487,17 @@ mod tests {
             prefixed.endpoint("now-playing", &[]).as_str(),
             "https://example.com/warehouse/api/now-playing"
         );
+    }
+
+    #[test]
+    fn search_that_was_not_echoed_is_an_error() {
+        assert!(check_search_applied(None, None).is_ok());
+        assert!(check_search_applied(Some("rosé"), Some("rosé")).is_ok());
+        assert!(matches!(
+            check_search_applied(Some("rosé"), None),
+            Err(ApiError::Decode(_))
+        ));
+        assert!(check_search_applied(Some("rosé"), Some("rose")).is_err());
     }
 
     #[test]
