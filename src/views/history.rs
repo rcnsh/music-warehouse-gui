@@ -23,7 +23,7 @@ use crate::api::ApiClient;
 use crate::dates;
 use crate::models::{Play, Rendition, album_rendition};
 use crate::state::history::HistoryStore;
-use crate::views::{palette, play_detail, widgets};
+use crate::views::{play_detail, widgets};
 
 const COL_ART: usize = 0;
 const COL_TIME: usize = 1;
@@ -294,9 +294,6 @@ pub struct HistoryView {
 
 impl HistoryView {
     pub fn new(client: ApiClient, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        // History is built once per signed-in window, with the client the
-        // palette's artist and song search needs.
-        palette::provide_client(&client, cx);
         let store = cx.new(|cx| HistoryStore::new(client, cx));
         let delegate = PlaysTable {
             store: store.clone(),

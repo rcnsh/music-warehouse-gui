@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use gpui::AppContext as _;
 use gpui::{
-    Action, App, Context, Entity, Global, IntoElement, ParentElement, SharedString, Styled, Task,
+    Action, App, Context, Entity, IntoElement, ParentElement, SharedString, Styled, Task,
     WeakEntity, Window, div, prelude::FluentBuilder, px,
 };
 use gpui_component::{
@@ -37,17 +37,6 @@ const SEARCH_LIMIT: u32 = 6;
 const SECTION_ARTISTS: usize = 1;
 const SECTION_SONGS: usize = 2;
 
-/// The client the palette searches with. The palette is opened by the shell
-/// with only a handle to it, so the History view, which is built with the
-/// client, provides it once at startup.
-struct SearchClient(ApiClient);
-
-impl Global for SearchClient {}
-
-pub fn provide_client(client: &ApiClient, cx: &mut App) {
-    cx.set_global(SearchClient(client.clone()));
-}
-
 /// Hands out a ticket per query so only the newest query's answer is shown:
 /// a slow reply to "ke" must not replace the list for "kendrick".
 #[derive(Debug, Default)]
@@ -76,7 +65,7 @@ struct Matches {
 
 /// Searches the Worker as the palette's query changes.
 struct PaletteSearch {
-    client: Option<ApiClient>,
+    client: ApiClient,
     palette: Entity<CommandState>,
     latest: LatestQuery,
     matches: Matches,
@@ -89,12 +78,13 @@ impl PaletteSearch {
     fn set_query(&mut self, query: &str, window: &mut Window, cx: &mut Context<Self>) {
         let query = query.trim().to_owned();
         let ticket = self.latest.next();
-        let Some(client) = self.client.clone().filter(|_| !query.is_empty()) else {
+        if query.is_empty() {
             self._task = None;
             self.matches = Matches::default();
             self.set_loading(false, window, cx);
             return;
-        };
+        }
+        let client = self.client.clone();
         self.set_loading(true, window, cx);
         self._task = Some(cx.spawn_in(window, async move |this, cx| {
             cx.background_executor().timer(SEARCH_AFTER).await;
@@ -331,7 +321,7 @@ impl PaletteCommand {
 /// not under the shell, so the shell's action handlers would never see them.
 /// The palette still dispatches an item's own action first; none of these
 /// has a handler on the dialog's path, so that dispatch does nothing.
-pub fn open(shell: WeakEntity<Shell>, window: &mut Window, cx: &mut App) {
+pub fn open(shell: WeakEntity<Shell>, client: ApiClient, window: &mut Window, cx: &mut App) {
     let state = cx.new(|cx| CommandState::new(window, cx));
     let current = crate::appearance::current(cx);
     let commands = PaletteCommand::all();
@@ -350,8 +340,8 @@ pub fn open(shell: WeakEntity<Shell>, window: &mut Window, cx: &mut App) {
         })
         .collect();
 
-    let search = cx.new(|cx| PaletteSearch {
-        client: cx.try_global::<SearchClient>().map(|c| c.0.clone()),
+    let search = cx.new(|_| PaletteSearch {
+        client,
         palette: state.clone(),
         latest: LatestQuery::default(),
         matches: Matches::default(),
