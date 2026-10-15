@@ -1,9 +1,10 @@
 use std::time::Duration;
 
+use chrono::NaiveDate;
 use gpui::AppContext as _;
 use gpui::{
-    App, ClipboardItem, Context, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement,
-    ParentElement, Render, SharedString, Styled, Subscription, Task, Window, div,
+    AnyElement, App, ClipboardItem, Context, Entity, FocusHandle, Focusable, InteractiveElement,
+    IntoElement, ParentElement, Render, SharedString, Styled, Subscription, Task, Window, div,
     prelude::FluentBuilder, px,
 };
 use gpui_component::{
@@ -22,7 +23,7 @@ use crate::api::ApiClient;
 use crate::dates;
 use crate::models::{Play, Rendition, album_rendition};
 use crate::state::history::HistoryStore;
-use crate::views::{play_detail, widgets};
+use crate::views::{palette, play_detail, widgets};
 
 const COL_ART: usize = 0;
 const COL_TIME: usize = 1;
@@ -48,24 +49,94 @@ fn searchable(text: &str) -> Option<&str> {
     }
 }
 
-/// Table rows are indices into the store's plays, so the store stays the
-/// single owner of fetched data. The Worker does the filtering (`q`), so
-/// every loaded row is shown.
+/// Reads the "search from date" box: empty for no start bound. The range
+/// ends at the go-to date, so a start after it could match nothing.
+fn parse_since(
+    text: &str,
+    anchor: Option<NaiveDate>,
+    today: NaiveDate,
+) -> Result<Option<NaiveDate>, String> {
+    if text.trim().is_empty() {
+        return Ok(None);
+    }
+    let day = dates::parse_jump(text, today)?;
+    match anchor {
+        Some(end) if day > end => Err(format!(
+            "The search start is after the go-to date ({}).",
+            end.format("%Y-%m-%d")
+        )),
+        _ => Ok(Some(day)),
+    }
+}
+
+/// A table row: an index into one of the store's lists, so the store stays
+/// the single owner of fetched data.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Row {
+    /// A play Spotify reports that the warehouse has not stored yet.
+    Unsaved(usize),
+    Stored(usize),
+}
+
+/// The Worker does the filtering (`q`), so every loaded row is shown, with
+/// any unsaved plays above them.
 pub struct PlaysTable {
     store: Entity<HistoryStore>,
-    rows: Vec<usize>,
+    rows: Vec<Row>,
 }
 
 impl PlaysTable {
     fn rebuild(&mut self, cx: &App) {
-        self.rows = (0..self.store.read(cx).plays().len()).collect();
+        let store = self.store.read(cx);
+        self.rows = (0..store.unsaved().len())
+            .map(Row::Unsaved)
+            .chain((0..store.plays().len()).map(Row::Stored))
+            .collect();
     }
 
     fn play<'a>(&self, row_ix: usize, cx: &'a App) -> Option<&'a Play> {
-        let ix = *self.rows.get(row_ix)?;
-        self.store.read(cx).plays().get(ix)
+        let store = self.store.read(cx);
+        match *self.rows.get(row_ix)? {
+            Row::Unsaved(ix) => store.unsaved().get(ix),
+            Row::Stored(ix) => store.plays().get(ix),
+        }
+    }
+
+    fn is_unsaved(&self, row_ix: usize) -> bool {
+        matches!(self.rows.get(row_ix), Some(Row::Unsaved(_)))
     }
 }
+
+/// The time column for an unsaved play: a label saying so, then a short
+/// time, since such plays are at most a day or so old.
+fn unsaved_time(play: &Play, cx: &App) -> AnyElement {
+    let muted = cx.theme().muted_foreground;
+    let when = chrono::DateTime::from_timestamp_millis(play.played_at_ms)
+        .map(|utc| {
+            utc.with_timezone(&chrono::Local)
+                .format("%a %H:%M")
+                .to_string()
+        })
+        .unwrap_or_default();
+    h_flex()
+        .gap_1p5()
+        .overflow_hidden()
+        .child(
+            div()
+                .flex_shrink_0()
+                .px_1()
+                .rounded_sm()
+                .border_1()
+                .border_color(cx.theme().border)
+                .text_xs()
+                .text_color(muted)
+                .child(UNSAVED_LABEL),
+        )
+        .child(div().truncate().text_color(muted).child(when))
+        .into_any_element()
+}
+
+const UNSAVED_LABEL: &str = "Not saved yet";
 
 impl TableDelegate for PlaysTable {
     fn columns_count(&self, _: &App) -> usize {
@@ -104,6 +175,10 @@ impl TableDelegate for PlaysTable {
             return widgets::artwork(url, px(22.), false, cx);
         }
         let muted = cx.theme().muted_foreground;
+        let unsaved = self.is_unsaved(row_ix);
+        if unsaved && col_ix == COL_TIME {
+            return unsaved_time(play, cx);
+        }
         // Export-era rows lack album names; say so rather than leave a hole
         // that looks like a rendering bug.
         let (text, is_missing): (SharedString, bool) = match col_ix {
@@ -117,7 +192,8 @@ impl TableDelegate for PlaysTable {
         };
         div()
             .truncate()
-            .when(col_ix == COL_TIME, |this| this.text_color(muted))
+            // Unsaved rows are muted throughout, so they read as provisional.
+            .when(col_ix == COL_TIME || unsaved, |this| this.text_color(muted))
             .when(is_missing, |this| this.text_color(muted).italic())
             .child(text)
             .into_any_element()
@@ -129,6 +205,10 @@ impl TableDelegate for PlaysTable {
         };
         match col_ix {
             COL_ART => String::new(),
+            COL_TIME if self.is_unsaved(row_ix) => format!(
+                "{} ({UNSAVED_LABEL})",
+                dates::format_played_at(play.played_at_ms, &chrono::Local)
+            ),
             COL_TIME => dates::format_played_at(play.played_at_ms, &chrono::Local),
             COL_TRACK => play.track_name.clone().unwrap_or_default(),
             COL_ARTIST => play.artists.clone().unwrap_or_default(),
@@ -170,9 +250,14 @@ impl TableDelegate for PlaysTable {
             )
             .into_any_element();
         };
-        let scope = match store.anchor() {
-            Some(day) => format!("Searched every play up to {}.", day.format("%-d %b %Y")),
-            None => "Searched every stored play.".to_owned(),
+        let day = |d: chrono::NaiveDate| d.format("%-d %b %Y").to_string();
+        let scope = match (store.since(), store.anchor()) {
+            (Some(from), Some(to)) => {
+                format!("Searched every play from {} to {}.", day(from), day(to))
+            }
+            (Some(from), None) => format!("Searched every play since {}.", day(from)),
+            (None, Some(to)) => format!("Searched every play up to {}.", day(to)),
+            (None, None) => "Searched every stored play.".to_owned(),
         };
         widgets::state_panel(
             Some(Icon::new(IconName::Search)),
@@ -198,6 +283,9 @@ pub struct HistoryView {
     filter: Entity<InputState>,
     jump: Entity<InputState>,
     jump_error: Option<SharedString>,
+    /// The first day a search covers; the go-to date is the last.
+    since: Entity<InputState>,
+    since_error: Option<SharedString>,
     /// Set while the filter holds too little text to search.
     filter_too_short: bool,
     _search_debounce: Option<Task<()>>,
@@ -206,6 +294,9 @@ pub struct HistoryView {
 
 impl HistoryView {
     pub fn new(client: ApiClient, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        // History is built once per signed-in window, with the client the
+        // palette's artist and song search needs.
+        palette::provide_client(&client, cx);
         let store = cx.new(|cx| HistoryStore::new(client, cx));
         let delegate = PlaysTable {
             store: store.clone(),
@@ -222,6 +313,7 @@ impl HistoryView {
         });
 
         let jump = cx.new(|cx| InputState::new(window, cx).placeholder("Go to date"));
+        let since = cx.new(|cx| InputState::new(window, cx).placeholder("Search from date"));
 
         let subscriptions = vec![
             cx.observe(&store, |this, _, cx| this.rebuild_rows(cx)),
@@ -233,6 +325,7 @@ impl HistoryView {
             }),
             cx.subscribe_in(&filter, window, Self::on_filter_event),
             cx.subscribe_in(&jump, window, Self::on_jump_event),
+            cx.subscribe_in(&since, window, Self::on_since_event),
         ];
         Self {
             store,
@@ -240,6 +333,8 @@ impl HistoryView {
             filter,
             jump,
             jump_error: None,
+            since,
+            since_error: None,
             filter_too_short: false,
             _search_debounce: None,
             _subscriptions: subscriptions,
@@ -253,10 +348,14 @@ impl HistoryView {
         self.table.update(cx, |table, cx| {
             let before = table.selected_row();
             table.delegate_mut().rebuild(cx);
+            // An unsaved play keeps its selection when the Worker stores it:
+            // the stored row has the same time and track.
             let after = selected.and_then(|(ms, id)| {
-                table.delegate().rows.iter().position(|&ix| {
-                    let play = &table.delegate().store.read(cx).plays()[ix];
-                    play.played_at_ms == ms && play.track_id == id
+                let delegate = table.delegate();
+                (0..delegate.rows.len()).position(|row_ix| {
+                    delegate
+                        .play(row_ix, cx)
+                        .is_some_and(|play| play.played_at_ms == ms && play.track_id == id)
                 })
             });
             match (before, after) {
@@ -291,6 +390,47 @@ impl HistoryView {
             }
             InputEvent::Change if self.jump_error.is_some() => {
                 self.jump_error = None;
+                cx.notify();
+            }
+            _ => {}
+        }
+    }
+
+    /// Enter applies the start date; clearing the box lifts it at once.
+    fn on_since_event(
+        &mut self,
+        input: &Entity<InputState>,
+        event: &InputEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let text = input.read(cx).value().trim().to_owned();
+        match event {
+            InputEvent::PressEnter { .. } => {
+                let anchor = self.store.read(cx).anchor();
+                match parse_since(&text, anchor, dates::today_local()) {
+                    Ok(day) => {
+                        self.since_error = None;
+                        self.store.update(cx, |store, cx| store.set_since(day, cx));
+                        self.reset_table(cx);
+                        if self.store.read(cx).query().is_some() {
+                            self.focus_table(window, cx);
+                        } else {
+                            // A start date alone filters nothing; the search
+                            // box is where it takes effect.
+                            self.focus_filter(window, cx);
+                        }
+                    }
+                    Err(message) => self.since_error = Some(message.into()),
+                }
+                cx.notify();
+            }
+            InputEvent::Change => {
+                self.since_error = None;
+                if text.is_empty() && self.store.read(cx).since().is_some() {
+                    self.store.update(cx, |store, cx| store.set_since(None, cx));
+                    self.reset_table(cx);
+                }
                 cx.notify();
             }
             _ => {}
@@ -431,9 +571,22 @@ impl HistoryView {
             Some(day) => format!("From {} back · ", day.format("%a %-d %b %Y")),
             None => String::new(),
         };
+        match (store.since(), store.query()) {
+            (Some(day), Some(_)) => {
+                prefix.insert_str(0, &format!("Since {} · ", day.format("%a %-d %b %Y")))
+            }
+            (Some(_), None) => prefix.insert_str(0, "The start date applies to searches · "),
+            (None, _) => {}
+        }
         if self.filter_too_short {
             prefix.insert_str(0, "Type 2 or more characters to search · ");
         }
+        let unsaved = store.unsaved().len();
+        let suffix = match unsaved {
+            0 => String::new(),
+            1 => " · 1 play not saved yet".to_owned(),
+            n => format!(" · {n} plays not saved yet"),
+        };
         let (noun, all) = match store.query() {
             Some(_) => ("matching plays", "matching"),
             None => ("plays", "stored"),
@@ -449,7 +602,7 @@ impl HistoryView {
             }
             (false, false) => format!("All {n} {all} plays loaded"),
         };
-        format!("{prefix}{text}").into()
+        format!("{prefix}{text}{suffix}").into()
     }
 }
 
@@ -478,6 +631,12 @@ impl Render for HistoryView {
                 .into_any_element(),
         };
 
+        let selected_unsaved = {
+            let table = self.table.read(cx);
+            table
+                .selected_row()
+                .is_some_and(|row| table.delegate().is_unsaved(row))
+        };
         let detail = self.selected_play(cx).map(|play| {
             let actions = play_detail::DetailActions {
                 on_open: Box::new(cx.listener(|this, _, window, cx| {
@@ -490,7 +649,7 @@ impl Render for HistoryView {
                     cx.listener(|this, _, window, cx| this.close_details(window, cx)),
                 ),
             };
-            play_detail::render(&play, actions, cx)
+            play_detail::render(&play, selected_unsaved, actions, cx)
         });
 
         v_flex()
@@ -513,6 +672,14 @@ impl Render for HistoryView {
                         ),
                     )
                     .child(
+                        div().w(px(170.)).child(
+                            Input::new(&self.since)
+                                .prefix(Icon::new(IconName::CalendarDays).small())
+                                .cleanable(true)
+                                .small(),
+                        ),
+                    )
+                    .child(
                         div().w(px(150.)).child(
                             Input::new(&self.jump)
                                 .prefix(Icon::new(IconName::Calendar).small())
@@ -526,16 +693,19 @@ impl Render for HistoryView {
                             .child("⌘F search · ⌘G date · j/k move"),
                     ),
             )
-            .when_some(self.jump_error.clone(), |this, message| {
-                this.child(
-                    div()
-                        .px_3()
-                        .py_1()
-                        .text_xs()
-                        .text_color(cx.theme().danger)
-                        .child(message),
-                )
-            })
+            .when_some(
+                self.since_error.clone().or(self.jump_error.clone()),
+                |this, message| {
+                    this.child(
+                        div()
+                            .px_3()
+                            .py_1()
+                            .text_xs()
+                            .text_color(cx.theme().danger)
+                            .child(message),
+                    )
+                },
+            )
             .when_some(error.clone().filter(|_| has_rows), |this, error| {
                 let retry =
                     cx.listener(|this, _, _, cx| this.store.update(cx, |s, cx| s.retry(cx)));
@@ -604,6 +774,27 @@ mod tests {
         assert_eq!(searchable("é"), None);
         assert_eq!(searchable("u2"), Some("u2"));
         assert_eq!(searchable("divinity"), Some("divinity"));
+    }
+
+    #[test]
+    fn search_start_date() {
+        let day = |s| NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap();
+        let today = day("2026-10-15");
+        assert_eq!(parse_since("  ", None, today), Ok(None));
+        assert_eq!(
+            parse_since("2024-01-31", None, today),
+            Ok(Some(day("2024-01-31")))
+        );
+        // A future start means "today", as the go-to box treats it.
+        assert_eq!(parse_since("2030-01-01", None, today), Ok(Some(today)));
+        assert!(parse_since("yesterday", None, today).is_err());
+        // The range ends at the go-to date, so a later start is refused.
+        let end = Some(day("2024-06-01"));
+        assert!(parse_since("2024-06-02", end, today).is_err());
+        assert_eq!(
+            parse_since("2024-06-01", end, today),
+            Ok(Some(day("2024-06-01")))
+        );
     }
 
     #[test]
