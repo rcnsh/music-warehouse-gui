@@ -26,6 +26,24 @@ impl OnThisDayStore {
         }
     }
 
+    /// The day shown: the chosen one, or today's.
+    pub fn shown_date(&self) -> NaiveDate {
+        self.date.unwrap_or_else(dates::today_local)
+    }
+
+    /// Moves to another day. Today's date is stored as `None` so the page
+    /// keeps following the calendar if it stays open past midnight.
+    pub fn set_date(&mut self, date: NaiveDate, cx: &mut Context<Self>) {
+        let date = (date != dates::today_local()).then_some(date);
+        if date == self.date && self.day.data.is_some() {
+            return;
+        }
+        self.date = date;
+        // The old day's years would read as the new day's while it loads.
+        self.day.reset();
+        self.refresh(cx);
+    }
+
     pub fn refresh(&mut self, cx: &mut Context<Self>) {
         self.day.start();
         let client = self.client.clone();
