@@ -49,7 +49,6 @@ impl OpenArtist {
         Self { id: id.into() }
     }
 
-    #[allow(dead_code)] // For pages whose figures name an artist but carry no id.
     pub fn by_name(name: &str) -> Self {
         Self::new(crate::models::artist_key(None, name))
     }
