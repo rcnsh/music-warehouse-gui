@@ -24,7 +24,7 @@ use gpui_component::{
 };
 use gpui_kit_assets::IconName;
 
-use crate::actions::OpenArtist;
+use crate::actions::{OpenArtist, OpenTrack};
 use crate::api::{ApiClient, ApiError, TopRange};
 use crate::dates::{self, RangePreset};
 use crate::models::{DayCount, ImageRef, join_names, pick_image};
@@ -60,9 +60,9 @@ impl TableDelegate for ArtistsTable {
 
     fn column(&self, col_ix: usize, _: &App) -> Column {
         match col_ix {
-            0 => Column::new("rank", "#").width(px(44.)).text_right(),
-            1 => Column::new("artist", "Artist").width(px(260.)),
-            _ => Column::new("plays", "Plays").width(px(220.)),
+            0 => Column::new("rank", "#").width(px(40.)).text_right(),
+            1 => Column::new("artist", "Artist").width(px(150.)),
+            _ => Column::new("plays", "Plays").width(px(110.)),
         }
     }
 
@@ -444,6 +444,49 @@ impl OverviewView {
         }
     }
 
+    fn render_tracks(&self, cx: &mut Context<Self>) -> AnyElement {
+        let tracks = &self.store.read(cx).tracks;
+        let retry = cx.listener(|this, _, _, cx| this.refresh(cx));
+        widgets::remote_view(
+            "tracks-retry",
+            tracks,
+            "Loading top songs…",
+            retry,
+            cx,
+            |response| {
+                if response.tracks.is_empty() {
+                    return widgets::state_panel(
+                        Some(Icon::new(IconName::Inbox)),
+                        "No songs in this range",
+                        None,
+                        None,
+                        cx,
+                    )
+                    .into_any_element();
+                }
+                // No share bar: in a third of the window it would squeeze
+                // the titles, which matter more than a second scale.
+                let rows = response.tracks.iter().enumerate().map(|(ix, song)| {
+                    let art = widgets::album_art(song.image.as_deref(), px(32.), cx);
+                    let row = widgets::RankedRow::new(("top-song", ix), song.name.clone())
+                        .rank(ix + 1)
+                        .art(art)
+                        .when_some(song.artist.clone(), |row, artist| row.subtitle(artist))
+                        .value(widgets::count(song.plays.into()));
+                    match &song.id {
+                        Some(id) => row.on_click_action(OpenTrack::new(id.clone())),
+                        None => row,
+                    }
+                });
+                div()
+                    .size_full()
+                    .overflow_y_scrollbar()
+                    .child(v_flex().children(rows))
+                    .into_any_element()
+            },
+        )
+    }
+
     fn render_spotify_top(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let store = self.store.read(cx);
         let selected = store.spotify_range;
@@ -593,6 +636,10 @@ impl Render for OverviewView {
             let artists = &self.store.read(cx).artists;
             artists.loading && artists.data.is_some()
         };
+        let tracks_refreshing = {
+            let tracks = &self.store.read(cx).tracks;
+            tracks.loading && tracks.data.is_some()
+        };
         let daily_refreshing = {
             let daily = &self.store.read(cx).daily;
             daily.loading && daily.data.is_some()
@@ -627,7 +674,7 @@ impl Render for OverviewView {
                             if artists_loading_more {
                                 "Top artists · refreshing…"
                             } else {
-                                "Top artists · double-click for an artist's page"
+                                "Top artists · double-click to open"
                             },
                             cx,
                         )
@@ -636,8 +683,21 @@ impl Render for OverviewView {
                         .child(div().flex_1().min_h_0().child(self.render_artists(cx))),
                     )
                     .child(
+                        widgets::card(
+                            if tracks_refreshing {
+                                "Top songs · refreshing…"
+                            } else {
+                                "Top songs · click to open"
+                            },
+                            cx,
+                        )
+                        .flex_1()
+                        .min_w_0()
+                        .child(div().flex_1().min_h_0().child(self.render_tracks(cx))),
+                    )
+                    .child(
                         div()
-                            .w(px(340.))
+                            .w(px(300.))
                             .h_full()
                             .child(self.render_spotify_top(cx)),
                     ),
