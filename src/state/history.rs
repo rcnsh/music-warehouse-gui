@@ -78,9 +78,16 @@ impl PlayLog {
     }
 
     pub fn append_page(&mut self, page: PlaysPage, page_size: u32) {
-        let PlaysPage { plays, next_before } = page;
+        let PlaysPage {
+            plays,
+            next_before,
+            last,
+        } = page;
         self.cursor = next_before;
-        let full_page = plays.len() as u32 >= page_size;
+        // The Worker reads one row past the page, so a page it calls the
+        // last is, even when it is full; without that word, a short page is
+        // the only sign.
+        let full_page = plays.len() as u32 >= page_size && !last;
         let mut added = 0;
         for play in plays {
             if self.seen.insert((play.played_at_ms, play.track_id.clone())) {
@@ -671,6 +678,7 @@ mod tests {
         PlaysPage {
             plays,
             next_before: None,
+            last: false,
         }
     }
 
@@ -860,24 +868,45 @@ mod tests {
         log.append_page(
             PlaysPage {
                 plays: vec![play(30, "a"), play(20, "b")],
-                next_before: Some("20:b".into()),
+                next_before: Some("20.b".into()),
+                last: false,
             },
             2,
         );
-        assert_eq!(log.next_before(), Some(Before::Cursor("20:b".into())));
+        assert_eq!(log.next_before(), Some(Before::Cursor("20.b".into())));
         // A Worker without cursors falls back to the timestamp.
         log.append_page(page(vec![play(10, "c"), play(5, "d")]), 2);
         assert_eq!(log.next_before(), Some(Before::Ms(6)));
     }
 
     #[test]
+    fn a_full_page_the_worker_calls_the_last_ends_the_list() {
+        // The Worker's last page can be exactly full: it read one row past
+        // it and found none, so asking for more would only re-read the end.
+        let mut log = PlayLog::default();
+        log.append_page(
+            PlaysPage {
+                plays: vec![play(30, "a"), play(20, "b")],
+                next_before: None,
+                last: true,
+            },
+            2,
+        );
+        assert!(log.is_exhausted());
+        // A Worker older than cursors leaves a full page open.
+        let mut old = PlayLog::default();
+        old.append_page(page(vec![play(30, "a"), play(20, "b")]), 2);
+        assert!(!old.is_exhausted());
+    }
+
+    #[test]
     fn plays_responses_decode_with_and_without_a_cursor() {
         let with: crate::models::PlaysResponse =
             serde_json::from_str(r#"{"plays":[],"next_before":"abc"}"#).unwrap();
-        assert_eq!(with.next_before.as_deref(), Some("abc"));
+        assert_eq!(with.next_before, Some(Some("abc".into())));
         let done: crate::models::PlaysResponse =
             serde_json::from_str(r#"{"plays":[],"next_before":null}"#).unwrap();
-        assert_eq!(done.next_before, None);
+        assert_eq!(done.next_before, Some(None));
         let old: crate::models::PlaysResponse = serde_json::from_str(r#"{"plays":[]}"#).unwrap();
         assert_eq!(old.next_before, None);
     }

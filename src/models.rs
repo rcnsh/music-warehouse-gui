@@ -109,12 +109,18 @@ pub struct FilterEcho {
 #[derive(Debug, Clone, Deserialize)]
 pub struct PlaysResponse {
     pub plays: Vec<Play>,
-    /// The `before` for the next page, opaque; null after the last page and
-    /// absent from Workers older than it.
-    #[serde(default)]
-    pub next_before: Option<String>,
+    /// The `before` for the next page, opaque. The Worker reads one row past
+    /// the page, so an explicit `null` means there is no page after this one
+    /// (`Some(None)`); a Worker older than cursors sends nothing (`None`).
+    #[serde(default, deserialize_with = "nullable")]
+    pub next_before: Option<Option<String>>,
     #[serde(flatten)]
     pub filter: FilterEcho,
+}
+
+/// Keeps `null` apart from absent, which `Option` alone folds together.
+fn nullable<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Option<String>>, D::Error> {
+    Option::<String>::deserialize(d).map(Some)
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -792,6 +798,8 @@ pub struct WrappedArtist {
     pub days: u32,
     pub longest_run_days: u32,
     pub top_song: Option<String>,
+    /// The top song's most-listened edition, for the Track page.
+    pub top_song_id: Option<String>,
     pub image: Option<String>,
 }
 
@@ -833,6 +841,7 @@ pub struct WrappedMonth {
     pub top_artist: Option<String>,
     pub top_artist_id: Option<String>,
     pub top_song: Option<String>,
+    pub top_song_id: Option<String>,
     pub image: Option<String>,
 }
 
