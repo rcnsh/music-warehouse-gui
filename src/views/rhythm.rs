@@ -407,6 +407,43 @@ mod tests {
     }
 
     #[test]
+    fn short_and_running_streaks_read_naturally() {
+        let streak = |days, weeks, running| Streak {
+            days,
+            weeks,
+            from: "2026-10".into(),
+            to: "2026-10".into(),
+            running,
+        };
+        assert_eq!(streak_length(&streak(Some(1), 0, false)), "1 day");
+        assert_eq!(streak_length(&streak(None, 0, true)), "Under a week so far");
+        assert_eq!(streak_length(&streak(None, 1, true)), "1 week so far");
+        // A finished run in one month names that month once.
+        assert_eq!(streak_span(&streak(Some(3), 0, false)), "Oct 2026");
+        // Bars compare a finished run's days with a running one's weeks.
+        assert_eq!(approx_days(&streak(Some(3), 9, false)), 3);
+    }
+
+    #[test]
+    fn activity_mentions_a_current_run_only_when_there_is_one() {
+        let set = |current_weeks| StreakSet {
+            threshold: 1,
+            active_share: 0.5,
+            current_weeks,
+            ..StreakSet::default()
+        };
+        assert_eq!(activity_line(&set(0)), "50% of days reach it");
+        assert_eq!(
+            activity_line(&set(1)),
+            "50% of days reach it. Current run: 1 week"
+        );
+        assert_eq!(
+            activity_line(&set(3)),
+            "50% of days reach it. Current run: 3 weeks"
+        );
+    }
+
+    #[test]
     fn heat_is_relative_to_the_busiest_cell() {
         let levels = heat_levels(&[vec![0.0, 0.01], vec![0.02, 0.005]]);
         assert_eq!(levels, vec![vec![0.0, 0.5], vec![1.0, 0.25]]);

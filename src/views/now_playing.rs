@@ -220,6 +220,44 @@ mod tests {
     }
 
     #[test]
+    fn a_paused_episode_names_its_show_and_uses_its_own_art() {
+        let current: CurrentlyPlaying = decode(
+            r#"{"is_playing":false,"currently_playing_type":"episode","item":{
+                "name":"Episode 12","show":{"name":"The Show"},
+                "images":[{"url":"https://i.scdn.co/image/ep","width":64}]}}"#,
+        )
+        .unwrap();
+        let line = describe_playing(&current);
+        assert_eq!(line.title.as_ref(), "Paused · Episode 12");
+        assert_eq!(line.detail.as_deref(), Some("The Show"));
+        assert_eq!(line.art.as_deref(), Some("https://i.scdn.co/image/ep"));
+    }
+
+    #[test]
+    fn a_track_missing_credits_shows_what_it_has() {
+        let current: CurrentlyPlaying =
+            decode(r#"{"is_playing":true,"item":{"album":{"name":"Album"},"artists":[]}}"#)
+                .unwrap();
+        let line = describe_playing(&current);
+        assert_eq!(line.title.as_ref(), "Unknown");
+        assert_eq!(line.detail.as_deref(), Some("Album"));
+    }
+
+    #[test]
+    fn a_rate_limit_without_a_wait_says_when_it_checks_next() {
+        let limited = ApiError::RateLimited {
+            retry_after_seconds: None,
+        };
+        let line = describe_error(&limited, Some("at 14:05".into()));
+        assert_eq!(line.detail.as_deref(), Some("Next check at 14:05"));
+        let told = ApiError::RateLimited {
+            retry_after_seconds: Some(120),
+        };
+        let line = describe_error(&told, Some("at 14:05".into()));
+        assert_eq!(line.detail.as_deref(), Some("Spotify asked for 2 min"));
+    }
+
+    #[test]
     fn reauth_keeps_history_reassurance() {
         let line = describe_error(&ApiError::NeedsReauth, None);
         assert!(line.detail.unwrap().contains("History"));
