@@ -265,7 +265,8 @@ impl ApiClient {
         filter.check_applied(&response.filter)?;
         Ok(PlaysPage {
             plays: response.plays,
-            next_before: response.next_before,
+            next_before: response.next_before.clone().flatten(),
+            last: response.next_before == Some(None),
         })
     }
 
@@ -670,6 +671,9 @@ pub enum Before {
 pub struct PlaysPage {
     pub plays: Vec<Play>,
     pub next_before: Option<String>,
+    /// The Worker said no page follows (`next_before: null`). False from a
+    /// Worker older than cursors, which says nothing either way.
+    pub last: bool,
 }
 
 fn plays_query(
@@ -987,14 +991,38 @@ mod tests {
                 "plays",
                 &plays_query(
                     200,
-                    Some(Before::Cursor("1791331200000:abc".into())),
+                    Some(Before::Cursor("1791331200000.abc".into())),
                     None,
                     &PlayFilter::default()
                 )
             )
             .as_str(),
-            "https://music.example.com/api/plays?limit=200&before=1791331200000%3Aabc"
+            "https://music.example.com/api/plays?limit=200&before=1791331200000.abc"
         );
+    }
+
+    #[test]
+    fn the_last_page_is_told_apart_from_an_older_worker() {
+        let page = |body: &str| {
+            let response: PlaysResponse = decode(body).unwrap();
+            PlaysPage {
+                plays: response.plays,
+                next_before: response.next_before.clone().flatten(),
+                last: response.next_before == Some(None),
+            }
+        };
+        // A cursor: more follows.
+        let more = page(r#"{"plays":[],"next_before":"1791331200000.abc"}"#);
+        assert_eq!(more.next_before.as_deref(), Some("1791331200000.abc"));
+        assert!(!more.last);
+        // The Worker read one row past the page and found none.
+        let done = page(r#"{"plays":[],"next_before":null}"#);
+        assert_eq!(done.next_before, None);
+        assert!(done.last);
+        // A Worker older than cursors says nothing, so paging falls back to timestamps.
+        let old = page(r#"{"plays":[]}"#);
+        assert_eq!(old.next_before, None);
+        assert!(!old.last);
     }
 
     #[test]
@@ -1284,6 +1312,9 @@ mod tests {
         assert_eq!(wrapped.weekdays.len(), 7);
         assert_eq!(wrapped.listening_age.as_ref().unwrap().window, (2015, 2019));
         assert_eq!(wrapped.top_artists[1].top_song, None);
+        assert_eq!(wrapped.top_artists[1].top_song_id, None);
+        assert!(wrapped.top_artists[0].top_song_id.is_some());
+        assert!(wrapped.months[0].top_song_id.is_some());
         assert_eq!(wrapped.streak.as_ref().unwrap().days, 64);
 
         let artist = &wrapped.top_artists[0];
