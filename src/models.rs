@@ -1055,4 +1055,116 @@ mod tests {
             "https://i.scdn.co/image/ab67616d00001e022e02"
         );
     }
+
+    fn credit(id: Option<&str>, name: &str) -> Credit {
+        Credit {
+            id: id.map(str::to_owned),
+            name: name.into(),
+        }
+    }
+
+    #[test]
+    fn credits_prefer_the_list_with_ids_and_fall_back_to_the_joined_names() {
+        // A comma inside a name survives only through the list.
+        let listed = Play {
+            artists: Some("Tyler, The Creator, Kali Uchis".into()),
+            artist_list: Some(vec![
+                credit(Some("4V8LLVI7PbaPR0K2TGSxFF"), "Tyler, The Creator"),
+                credit(Some("1U1el3k54VvEUzo3ybLPlM"), "Kali Uchis"),
+            ]),
+            ..Play::default()
+        };
+        assert_eq!(listed.credits()[0].name, "Tyler, The Creator");
+        assert_eq!(listed.credits().len(), 2);
+
+        // Older Workers send no list, and an empty one is no better.
+        for artist_list in [None, Some(vec![])] {
+            let play = Play {
+                artists: Some("SZA, Kendrick Lamar".into()),
+                artist_list,
+                ..Play::default()
+            };
+            assert_eq!(
+                play.credits(),
+                [credit(None, "SZA"), credit(None, "Kendrick Lamar")]
+            );
+        }
+        assert!(Play::default().credits().is_empty());
+
+        let concert = Concert {
+            artists: "A, B".into(),
+            artist_list: Some(vec![]),
+            ..Concert::default()
+        };
+        assert_eq!(concert.credits(), [credit(None, "A"), credit(None, "B")]);
+    }
+
+    #[test]
+    fn artists_without_an_id_open_by_name() {
+        assert_eq!(
+            artist_key(Some("2YZyLoL8N0Wb9xBt1NhZWg"), "x"),
+            "2YZyLoL8N0Wb9xBt1NhZWg"
+        );
+        // An empty id is no id: opening "" would ask the Worker for nothing.
+        assert_eq!(artist_key(Some(""), "Sigur Rós"), "name:Sigur Rós");
+        assert_eq!(artist_key(None, "Sigur Rós"), "name:Sigur Rós");
+    }
+
+    #[test]
+    fn live_credits_join_like_stored_ones() {
+        let named = |name: Option<&str>| NamedRef {
+            id: None,
+            name: name.map(str::to_owned),
+            images: vec![],
+        };
+        assert_eq!(
+            join_names(&[
+                named(Some("SZA")),
+                named(None),
+                named(Some("Kendrick Lamar"))
+            ]),
+            "SZA, Kendrick Lamar"
+        );
+        assert_eq!(join_names(&[]), "");
+    }
+
+    #[test]
+    fn artwork_is_the_albums_unless_it_has_none() {
+        let item = |album: Option<NamedRef>| PlayingItem {
+            id: None,
+            name: None,
+            artists: vec![],
+            album,
+            show: None,
+            images: vec![image(Some(64), "episode")],
+        };
+        let album = |images| NamedRef {
+            id: None,
+            name: None,
+            images,
+        };
+        assert_eq!(
+            item(Some(album(vec![image(Some(64), "album")]))).artwork()[0].url,
+            "album"
+        );
+        assert_eq!(item(Some(album(vec![]))).artwork()[0].url, "episode");
+        assert_eq!(item(None).artwork()[0].url, "episode");
+    }
+
+    #[test]
+    fn images_without_a_width_are_a_last_resort() {
+        let images = [image(None, "unknown"), image(Some(300), "m")];
+        assert_eq!(pick_image(&images, 64), Some("m"));
+        assert_eq!(pick_image(&[image(None, "unknown")], 64), Some("unknown"));
+    }
+
+    #[test]
+    fn regions_read_by_their_label() {
+        let concerts: ConcertsResponse = serde_json::from_str(
+            r#"{"regions":[{"key":"pt","label":"Portugal"}],"checked":{},"concerts":[]}"#,
+        )
+        .unwrap();
+        assert_eq!(concerts.region_label("pt"), "Portugal");
+        assert_eq!(concerts.region_label("es"), "es");
+    }
 }

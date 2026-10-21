@@ -1365,6 +1365,108 @@ mod tests {
     }
 
     #[test]
+    fn plain_http_is_only_for_this_machine() {
+        for local in [
+            "http://localhost:8787",
+            "http://127.0.0.1",
+            "http://[::1]:8787",
+        ] {
+            assert!(parse_base_url(local).is_ok(), "{local}");
+        }
+        // Names that only start like loopback still go over the network.
+        for remote in [
+            "http://localhost.example.com",
+            "http://127.0.0.1.example.com",
+            "http://192.168.1.10:8787",
+        ] {
+            assert!(parse_base_url(remote).is_err(), "{remote}");
+        }
+    }
+
+    #[test]
+    fn a_saved_base_url_keeps_its_prefix_and_drops_the_rest() {
+        // A pasted link's query or fragment must not ride along on every
+        // request, and trailing slashes must not double up before /api.
+        let url = parse_base_url("https://example.com/warehouse//?token=abc#top").unwrap();
+        assert_eq!(url.as_str(), "https://example.com/warehouse");
+        let client = ApiClient::new(url, Secret::new("t"));
+        assert_eq!(
+            client.endpoint("daily", &[]).as_str(),
+            "https://example.com/warehouse/api/daily"
+        );
+    }
+
+    #[test]
+    fn only_spotify_failures_are_spotify_side() {
+        let spotify = [
+            ApiError::NeedsReauth,
+            ApiError::RateLimited {
+                retry_after_seconds: None,
+            },
+            ApiError::Upstream("x".into()),
+        ];
+        assert!(spotify.iter().all(ApiError::is_spotify_side));
+        let worker = [
+            ApiError::Unauthorized,
+            ApiError::BadRequest("x".into()),
+            ApiError::StillComputing {
+                retry_after_seconds: 5,
+            },
+            ApiError::Server {
+                status: 500,
+                message: "x".into(),
+            },
+            ApiError::Network("x".into()),
+            ApiError::Decode("x".into()),
+            ApiError::File("x".into()),
+        ];
+        assert!(!worker.iter().any(ApiError::is_spotify_side));
+    }
+
+    #[test]
+    fn long_error_pages_are_cut_short_without_splitting_a_character() {
+        let page = "é".repeat(500);
+        let ApiError::Server { message, .. } = ApiError::from_response(500, None, &page) else {
+            panic!("a 500 is a server error");
+        };
+        assert_eq!(message.chars().count(), 200);
+        // The Worker's own message is kept whole, however long.
+        let long = format!(r#"{{"error":"{}"}}"#, "x".repeat(300));
+        assert_eq!(
+            ApiError::from_response(400, None, &long),
+            ApiError::BadRequest("x".repeat(300))
+        );
+    }
+
+    #[test]
+    fn a_search_echoed_trimmed_was_applied() {
+        let sent = PlayFilter::default().search(Some(" dna "));
+        let echoed = FilterEcho {
+            q: Some("dna".into()),
+            ..FilterEcho::default()
+        };
+        assert!(sent.check_applied(&echoed).is_ok());
+    }
+
+    #[test]
+    fn an_artist_placeholder_filters_by_its_name_too() {
+        let placeholder = PlayFilter::artist("name:Sigur Rós");
+        assert_eq!(placeholder.artist_name.as_deref(), Some("Sigur Rós"));
+        let real = PlayFilter::artist("6UUrUCIZtQeOf8tC0WuzRy");
+        assert_eq!(real.artist_name, None);
+        assert_eq!(
+            client().endpoint("daily", &placeholder.query()).as_str(),
+            "https://music.example.com/api/daily?artist_id=name%3ASigur+R%C3%B3s&artist_name=Sigur+R%C3%B3s"
+        );
+    }
+
+    #[test]
+    fn spotify_top_ranges_use_its_parameter_names() {
+        let params: Vec<_> = TopRange::ALL.iter().map(|r| r.as_param()).collect();
+        assert_eq!(params, ["short_term", "medium_term", "long_term"]);
+    }
+
+    #[test]
     fn admin_probe_only_flags_routed_requests() {
         assert!(admin_probe_verdict(404));
         assert!(!admin_probe_verdict(401));
