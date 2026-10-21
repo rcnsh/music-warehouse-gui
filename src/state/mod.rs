@@ -226,6 +226,34 @@ mod tests {
     }
 
     #[test]
+    fn a_failed_refresh_keeps_the_last_good_data() {
+        let mut remote = Remote::default();
+        remote.start();
+        assert!(remote.loading);
+        remote.finish(Ok(7));
+        assert_eq!(
+            (remote.data, remote.loading, remote.error.is_none()),
+            (Some(7), false, true)
+        );
+
+        remote.start();
+        remote.finish(Err(ApiError::Network("down".into())));
+        assert_eq!(remote.data, Some(7));
+        assert!(!remote.loading);
+        assert!(remote.error.is_some());
+
+        // Success clears the old error rather than leaving a stale banner.
+        remote.start();
+        remote.finish(Ok(8));
+        assert_eq!((remote.data, &remote.error), (Some(8), &None));
+
+        // A new query's view must not show the old query's figures.
+        remote.finish(Err(ApiError::Network("down".into())));
+        remote.reset();
+        assert_eq!((remote.data, &remote.error), (None, &None));
+    }
+
+    #[test]
     fn other_errors_are_not_retried() {
         assert_eq!(compute_retry(&ApiError::Network("down".into()), 0), None);
         let generic = ApiError::Server {

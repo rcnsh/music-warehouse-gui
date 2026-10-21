@@ -336,6 +336,61 @@ mod tests {
     }
 
     #[test]
+    fn a_day_ending_in_a_repeated_midnight_ends_at_the_first() {
+        let havana = chrono_tz::America::Havana;
+        // Cuba falls back from 01:00 to 00:00, so 1 Nov 2026 starts twice.
+        let midnight = d(2026, 11, 1).and_hms_opt(0, 0, 0).unwrap();
+        assert!(matches!(
+            havana.from_local_datetime(&midnight),
+            chrono::LocalResult::Ambiguous(..)
+        ));
+        // 00:00 at -04, not an hour later at -05: the later bound would
+        // put the first hour of 1 Nov on 31 Oct's page.
+        let first = DateTime::parse_from_rfc3339("2026-11-01T04:00:00Z")
+            .unwrap()
+            .timestamp_millis();
+        assert_eq!(end_of_local_day_ms(d(2026, 10, 31), &havana), Some(first));
+    }
+
+    #[test]
+    fn an_impossible_timestamp_is_a_dash() {
+        let utc = FixedOffset::east_opt(0).unwrap();
+        assert_eq!(format_played_at(i64::MAX, &utc), "—");
+    }
+
+    #[test]
+    fn custom_range_errors_name_the_box_at_fault() {
+        let today = d(2026, 10, 7);
+        assert!(
+            parse_custom("soon", "2026-09-30", today)
+                .unwrap_err()
+                .starts_with("Start")
+        );
+        assert!(
+            parse_custom("2026-09-01", "2026-02-30", today)
+                .unwrap_err()
+                .starts_with("End")
+        );
+        assert!(
+            parse_custom("2010-01-01", "2026-09-30", today)
+                .unwrap_err()
+                .contains(&MAX_RANGE_DAYS.to_string())
+        );
+    }
+
+    #[test]
+    fn every_preset_fits_the_workers_limit() {
+        for preset in RangePreset::ALL {
+            if let Some(range) = preset.resolve(d(2026, 10, 7)) {
+                assert!(range.day_count() <= MAX_RANGE_DAYS, "{preset:?}");
+            }
+        }
+        for preset in RangePreset::RECENT {
+            assert!(preset.resolve(d(2026, 10, 7)).is_some(), "{preset:?}");
+        }
+    }
+
+    #[test]
     fn day_labels_stay_unique_across_years() {
         assert_eq!(day_label("2026-10-06", 7), "Tue 6 Oct");
         assert_eq!(day_label("2026-10-06", 365), "6 Oct 2026");

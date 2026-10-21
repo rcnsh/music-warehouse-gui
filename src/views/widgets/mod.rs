@@ -326,6 +326,34 @@ mod tests {
     }
 
     #[test]
+    fn listening_time_changes_unit_at_the_hour_and_at_100_hours() {
+        assert_eq!(minutes(0), "0 min");
+        assert_eq!(minutes(59), "59 min");
+        assert_eq!(minutes(60), "1 h");
+        assert_eq!(minutes(61), "1 h 1 min");
+        assert_eq!(minutes(5999), "99 h 59 min");
+        // From 100 hours the minutes are noise and are dropped, not rounded.
+        assert_eq!(minutes(6000), "100 h");
+        assert_eq!(minutes(6059), "100 h");
+        assert_eq!(plural(0, "play"), "0 plays");
+    }
+
+    #[test]
+    fn percentages_change_precision_at_ten() {
+        assert_eq!(percent(0.001), "0.1%");
+        assert_eq!(percent(0.0949), "9.5%");
+        assert_eq!(percent(0.1), "10%");
+        assert_eq!(percent(1.), "100%");
+    }
+
+    #[test]
+    #[ignore = "bug: shares just under 10% round up to \"10.0%\" while 10% itself reads \"10%\""]
+    fn a_share_that_rounds_to_ten_percent_reads_like_ten_percent() {
+        // 9.96% keeps one decimal because it is under 10, then rounds up.
+        assert_eq!(percent(0.0996), "10%");
+    }
+
+    #[test]
     fn spans_and_days_read_naturally() {
         assert_eq!(
             month_span("2024-02", Some("2024-06")),

@@ -510,4 +510,52 @@ mod tests {
         assert!(change_verdict(0.433, &typical).starts_with("That is more than usual for a pair"));
         assert!(change_verdict(0.9, &typical).contains("more than any earlier pair"));
     }
+
+    #[test]
+    fn a_change_is_placed_against_every_band_of_the_usual_range() {
+        let typical = TypicalChange {
+            median: 0.38,
+            min: 0.21,
+            max: 0.61,
+            windows: 27,
+            exceeded_by: 9,
+        };
+        assert!(change_verdict(0.1, &typical).contains("less than any earlier pair"));
+        assert!(change_verdict(0.3, &typical).contains("less than usual for a pair"));
+        // The median itself counts as usual-or-more.
+        assert!(change_verdict(0.38, &typical).contains("more than usual for a pair"));
+        assert!(change_verdict(0.3, &typical).ends_with("9 of 27 changed more."));
+        let none = TypicalChange {
+            windows: 0,
+            ..typical
+        };
+        assert!(change_verdict(0.9, &none).starts_with("There isn't enough"));
+    }
+
+    #[test]
+    fn a_gauge_with_no_change_at_all_stays_finite() {
+        let flat = TypicalChange {
+            median: 0.,
+            min: 0.,
+            max: 0.,
+            windows: 3,
+            exceeded_by: 0,
+        };
+        let (min, max, median, this) = gauge_positions(0., &flat);
+        assert_eq!((min, max, median, this), (0., 0., 0., 0.));
+    }
+
+    #[test]
+    fn subtitle_and_period_fill_in_the_window() {
+        let mut data = fixture(include_str!("../../tests/fixtures/stats-eras.json"));
+        data.window_months = 1;
+        assert!(
+            subtitle(&data)
+                .unwrap()
+                .ends_with("one month each side of the change")
+        );
+        data.window_months = 0;
+        assert_eq!(subtitle(&data).unwrap().as_ref(), "City A → City B");
+        assert_eq!(period(None), "");
+    }
 }
