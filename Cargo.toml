@@ -17,7 +17,7 @@ gpui-component = "=0.7.1"
 reqwest_client = { package = "gpui-pre-reqwest-client", version = "=0.3.8" }
 gpui-base = "=0.7.1"
 gpui-kit-assets = "=0.7.1"
-base64 = "0.22"
+base64 = "0.23"
 chrono = "0.4.45"
 dirs = "7"
 getrandom = "0.3"
