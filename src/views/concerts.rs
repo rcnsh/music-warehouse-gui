@@ -164,9 +164,10 @@ fn render_concerts(
     if data.regions.is_empty() && data.concerts.is_empty() {
         return empty(
             IconName::MapPin,
-            "No concert regions are set up",
-            "Set CONCERT_REGIONS on the Worker to the places it should watch. Its daily \
-             check then looks up shows for your top artists there.",
+            "Concerts aren't set up",
+            "Set TICKETMASTER_API_KEY and CONCERT_REGIONS on the Worker (its README's \
+             \"Setting up concerts\"). Its daily check then looks up shows for your top \
+             artists in those places.",
             cx,
         );
     }

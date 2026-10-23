@@ -498,8 +498,10 @@ impl ApiClient {
         since: Option<NaiveDate>,
         tz: &str,
     ) -> Result<ConcertsResponse, ApiError> {
-        self.get(self.endpoint("concerts", &concerts_query(region, since, tz)))
-            .await
+        concerts_or_off(
+            self.get(self.endpoint("concerts", &concerts_query(region, since, tz)))
+                .await,
+        )
     }
 }
 
@@ -543,6 +545,18 @@ fn search_query(q: &str, artist: Option<&str>, limit: u32) -> Vec<(&'static str,
     }
     query.push(("limit", limit.clamp(1, 50).to_string()));
     query
+}
+
+/// Concerts are optional on the Worker: without a Ticketmaster key or a
+/// region it answers `404`, like a route it lacks. That reads as no regions,
+/// which the page shows as "not set up" rather than an error.
+fn concerts_or_off(
+    result: Result<ConcertsResponse, ApiError>,
+) -> Result<ConcertsResponse, ApiError> {
+    match result {
+        Err(ApiError::Server { status: 404, .. }) => Ok(ConcertsResponse::default()),
+        other => other,
+    }
 }
 
 fn concerts_query(
@@ -1334,6 +1348,21 @@ mod tests {
         .unwrap();
         assert_eq!(old.top_songs[0].track_id, None);
         assert_eq!(old.months[0].top_artist_id, None);
+    }
+
+    #[test]
+    fn concerts_off_on_the_worker_reads_as_no_regions() {
+        let off = concerts_or_off(Err(ApiError::from_response(
+            404,
+            None,
+            r#"{"error":"Not found"}"#,
+        )))
+        .unwrap();
+        assert!(off.regions.is_empty() && off.concerts.is_empty());
+        assert!(matches!(
+            concerts_or_off(Err(ApiError::from_response(500, None, "{}"))),
+            Err(ApiError::Server { status: 500, .. })
+        ));
     }
 
     #[test]
