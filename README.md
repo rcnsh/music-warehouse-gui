@@ -1,4 +1,5 @@
 <div align="center">
+<img src="assets/icon.svg" width="96" height="96" alt="">
 <h1>music-warehouse-gui</h1>
 <p><strong>A native macOS app for browsing your Spotify listening history.</strong></p>
 <p>
