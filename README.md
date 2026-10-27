@@ -188,14 +188,8 @@ it and move **Music Warehouse.app** to Applications. It is a universal app for
 Apple Silicon and Intel Macs on macOS 12 or later. If there is no release
 yet, build from source as in [Quick start](#quick-start).
 
-> [!IMPORTANT]
-> The app is signed ad hoc, not notarized, so macOS blocks the first launch
-> ("Apple could not verify…"). Allow it in **System Settings › Privacy &
-> Security › Open Anyway**, or run:
->
-> ```bash
-> xattr -dr com.apple.quarantine "/Applications/Music Warehouse.app"
-> ```
+Releases are signed with a Developer ID and notarized by Apple, so the app
+opens without a Gatekeeper prompt.
 
 ## Configuration
 
@@ -272,13 +266,28 @@ cargo build --release                  # binary at target/release/mwgui
 scripts/bundle-macos.sh target/release/mwgui 0.1.0 dist
 ```
 
-`bundle-macos.sh` wraps the binary in `Music Warehouse.app`, signs it ad hoc
-and writes a zip and its SHA-256 to `dist/`.
+`bundle-macos.sh` wraps the binary in `Music Warehouse.app`, signs it and
+writes a zip and its SHA-256 to `dist/`. It signs ad hoc unless
+`MACOS_SIGN_IDENTITY` names a Developer ID identity; with notary credentials
+as well (`NOTARY_PROFILE`, or `APPLE_ID`, `APPLE_APP_PASSWORD` and
+`APPLE_TEAM_ID`) it notarizes and staples the app. The script's header has
+the details.
 
 Releases are built by `.github/workflows/release.yml` when a `v*` tag is
 pushed. It runs the checks, refuses a tag that does not match the
 `Cargo.toml` version, builds arm64 and x86_64, joins them with `lipo` and
-publishes the bundled zip.
+publishes the bundled zip, signed and notarized with these repository
+secrets:
+
+| Secret | What it holds |
+|---|---|
+| `MACOS_CERTIFICATE_P12` | The Developer ID Application certificate and key, as a base64 `.p12` |
+| `MACOS_CERTIFICATE_PASSWORD` | The `.p12`'s password |
+| `APPLE_ID` | The Apple ID of the developer account |
+| `APPLE_APP_PASSWORD` | An app-specific password for that Apple ID |
+| `APPLE_TEAM_ID` | The team ID in the certificate's name |
+
+Without them it signs ad hoc and skips notarization.
 
 ```bash
 # after bumping version in Cargo.toml and committing
