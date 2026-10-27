@@ -69,9 +69,10 @@ ditto -c -k --sequesterRsrc --keepParent "$app" "$zip"
 if [ -n "${MACOS_SIGN_IDENTITY:-}" ]; then
   if [ -n "${NOTARY_PROFILE:-}" ]; then
     notary=(--keychain-profile "$NOTARY_PROFILE")
-  elif [ -n "${APPLE_ID:-}" ]; then
-    notary=(--apple-id "$APPLE_ID" --password "${APPLE_APP_PASSWORD:?}" --team-id "${APPLE_TEAM_ID:?}")
+  elif [ -n "${APPLE_ID:-}" ] && [ -n "${APPLE_APP_PASSWORD:-}" ] && [ -n "${APPLE_TEAM_ID:-}" ]; then
+    notary=(--apple-id "$APPLE_ID" --password "$APPLE_APP_PASSWORD" --team-id "$APPLE_TEAM_ID")
   else
+    echo "No notary credentials; signed with $MACOS_SIGN_IDENTITY but not notarized" >&2
     notary=()
   fi
   if [ ${#notary[@]} -gt 0 ]; then
