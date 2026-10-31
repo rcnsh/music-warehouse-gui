@@ -1,12 +1,14 @@
 name: release
 
-# Pushing a tag like v0.2.0 builds the app and publishes a GitHub release.
-# Running the workflow by hand builds the same zip as a downloadable artifact
-# without publishing anything, to try a release before tagging it.
+# Pushing a tag like v0.2.0 builds the app for macOS, Linux and Windows and
+# publishes a GitHub release. Running the workflow by hand builds the same
+# files as downloadable artifacts without publishing anything, to try a
+# release before tagging it.
 #
-# The checks and each architecture's build run on their own runners at the
-# same time, since a release build takes most of a runner's cores; the
-# package job then joins the two binaries into one app.
+# The checks and each platform's builds run on their own runners at the same
+# time, since a release build takes most of a runner's cores. The macOS
+# package job joins its two binaries into one app; publish waits for every
+# platform, so a release never goes out with one missing.
 on:
   push:
     tags: ["v*"]
@@ -54,7 +56,7 @@ jobs:
       - name: Check script
         run: cargo fmt --check && cargo clippy --locked --all-targets -- -D warnings && cargo test --locked
 
-  build:
+  macos-build:
     strategy:
       matrix:
         target: [aarch64-apple-darwin, x86_64-apple-darwin]
@@ -84,8 +86,8 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  package:
-    needs: [check, build]
+  macos-package:
+    needs: [check, macos-build]
     runs-on: macos-latest
     env:
       VERSION: ${{ needs.check.outputs.version }}
@@ -155,12 +157,110 @@ jobs:
             dist/*.zip.sha256
           if-no-files-found: error
 
+  # Built on 22.04 so the binary needs only glibc 2.35, which covers Ubuntu
+  # 22.04, Debian 12, Fedora 36 and later.
+  linux:
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-22.04
+          - arch: aarch64
+            runner: ubuntu-22.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        with:
+          # Pinned by commit, the action cannot read the toolchain from its ref.
+          toolchain: stable
+
+      - name: Build dependencies
+        run: scripts/linux-build-deps.sh
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: ${{ matrix.arch }}
+
+      - name: Build
+        run: cargo build --release --locked
+
+      - name: Package
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "music-warehouse-gui") | .version')
+          scripts/package-linux.sh target/release/mwgui "$version" ${{ matrix.arch }} dist
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: music-warehouse-gui-${{ env.VERSION }}-linux-${{ matrix.arch }}
+          path: |
+            dist/*.tar.gz
+            dist/*.tar.gz.sha256
+          if-no-files-found: error
+
+  windows:
+    runs-on: windows-latest
+    env:
+      # aws-lc-sys assembles with NASM, which the runner lacks; use its
+      # prebuilt objects.
+      AWS_LC_SYS_PREBUILT_NASM: 1
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        with:
+          # Pinned by commit, the action cannot read the toolchain from its ref.
+          toolchain: stable
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+
+      - name: Build
+        run: cargo build --release --locked
+
+      # Unsigned: Windows SmartScreen warns before the first launch.
+      - name: Package
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "music-warehouse-gui") | .version')
+          name="music-warehouse-gui-$version-windows-x86_64"
+          mkdir -p "dist/$name"
+          cp target/release/mwgui.exe "dist/$name/"
+          cd dist
+          7z a -tzip "$name.zip" "$name"
+          sha256sum "$name.zip" > "$name.zip.sha256"
+          rm -rf "$name"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: music-warehouse-gui-${{ env.VERSION }}-windows-x86_64
+          path: |
+            dist/*.zip
+            dist/*.zip.sha256
+          if-no-files-found: error
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [check, macos-package, linux, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: music-warehouse-gui-*
+          path: dist
+          merge-multiple: true
+
       - name: Publish release
-        if: startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/*.zip dist/*.zip.sha256 \
+          gh release create "$GITHUB_REF_NAME" dist/* \
             --title "Music Warehouse $GITHUB_REF_NAME" \
             --notes-file .github/release-notes.md \
             --generate-notes \

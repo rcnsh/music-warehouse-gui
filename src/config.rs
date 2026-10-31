@@ -1,9 +1,9 @@
 //! Where the Worker URL and read token live between launches.
 //!
-//! The URL is not secret and sits in a JSON file under Application Support so
-//! it is easy to inspect or delete. The token goes only to the macOS Keychain;
-//! it is never written to the config file, so copying or syncing that file
-//! cannot leak it.
+//! The URL is not secret and sits in a JSON file in the config directory so
+//! it is easy to inspect or delete. The token goes only to the platform's
+//! credential store ([`TOKEN_STORE`]); it is never written to the config file,
+//! so copying or syncing that file cannot leak it.
 
 use std::fs;
 use std::io;
@@ -18,12 +18,24 @@ const CONFIG_FILE: &str = "config.json";
 const KEYCHAIN_SERVICE: &str = "music-warehouse-gui";
 const KEYCHAIN_ACCOUNT: &str = "READ_TOKEN";
 
+/// The credential store `keyring` uses on this platform, as messages name it.
+/// On Linux that is the Secret Service (GNOME Keyring, KWallet).
+pub const TOKEN_STORE: &str = if cfg!(target_os = "macos") {
+    "macOS Keychain"
+} else if cfg!(windows) {
+    "Windows Credential Manager"
+} else {
+    "system keyring"
+};
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Config {
     pub worker_url: String,
 }
 
-/// `~/Library/Application Support/music-warehouse-gui`.
+/// `~/Library/Application Support/music-warehouse-gui` on macOS,
+/// `$XDG_CONFIG_HOME/music-warehouse-gui` on Linux, `%APPDATA%\music-warehouse-gui`
+/// on Windows.
 pub fn config_dir() -> Option<PathBuf> {
     dirs::config_dir().map(|dir| dir.join(APP_DIR))
 }
@@ -51,7 +63,7 @@ pub fn save_to(dir: &Path, config: &Config) -> io::Result<()> {
 
 fn entry() -> Result<keyring::Entry, String> {
     keyring::Entry::new(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT)
-        .map_err(|e| format!("Keychain unavailable: {e}"))
+        .map_err(|e| format!("The {TOKEN_STORE} is unavailable: {e}"))
 }
 
 /// `Ok(None)` means no token has been saved yet, which is first-run, not an error.
@@ -63,7 +75,9 @@ pub fn load_token() -> Result<Option<Secret>, String> {
     match entry()?.get_password() {
         Ok(value) => Ok(Some(Secret::new(value))),
         Err(keyring::Error::NoEntry) => Ok(None),
-        Err(e) => Err(format!("Could not read the token from the Keychain: {e}")),
+        Err(e) => Err(format!(
+            "Could not read the token from the {TOKEN_STORE}: {e}"
+        )),
     }
 }
 
@@ -93,7 +107,7 @@ fn read_token_line(dotenv: &str) -> Option<Secret> {
 pub fn save_token(token: &Secret) -> Result<(), String> {
     entry()?
         .set_password(token.expose())
-        .map_err(|e| format!("Could not save the token to the Keychain: {e}"))
+        .map_err(|e| format!("Could not save the token to the {TOKEN_STORE}: {e}"))
 }
 
 #[cfg(test)]

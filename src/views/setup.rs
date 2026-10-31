@@ -84,9 +84,12 @@ impl SetupView {
             }
         });
         let token_placeholder = if existing_token.is_some() {
-            "Saved in Keychain. Leave blank to keep it"
+            format!(
+                "Saved in the {}. Leave blank to keep it",
+                config::TOKEN_STORE
+            )
         } else {
-            "READ_TOKEN, or a device token"
+            "READ_TOKEN, or a device token".into()
         };
         let token_input = cx.new(|cx| {
             InputState::new(window, cx)
@@ -301,7 +304,7 @@ impl SetupView {
 /// Writes the URL to the config file and, when asked, the token to the
 /// Keychain. Blocking; call it from a background task.
 fn persist(url: &Url, token: &Secret, write_token: bool) -> Result<(), String> {
-    let dir = config::config_dir().ok_or("Could not find Application Support.")?;
+    let dir = config::config_dir().ok_or("Could not find the settings folder.")?;
     let config = Config {
         worker_url: url.to_string(),
     };
@@ -361,12 +364,12 @@ impl Render for SetupView {
                         div()
                             .text_sm()
                             .text_color(cx.theme().muted_foreground)
-                            .child(
+                            .child(format!(
                                 "Enter your Worker's URL, then sign in with the Spotify account \
-                                 that owns it, or paste a read token. The URL is saved under \
-                                 Application Support; the token is stored only in the macOS \
-                                 Keychain.",
-                            ),
+                                 that owns it, or paste a read token. The URL is saved in a \
+                                 settings file; the token is stored only in the {}.",
+                                config::TOKEN_STORE
+                            )),
                     )
                     .when_some(self.notice.clone(), |this, notice| {
                         this.child(

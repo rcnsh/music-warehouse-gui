@@ -176,6 +176,25 @@ pub fn note(text: impl Into<SharedString>, cx: &App) -> impl IntoElement {
         .child(text.into())
 }
 
+/// A shortcut as this platform writes it: `⌘K` on macOS, `Ctrl+K` elsewhere.
+/// Keybindings use `secondary-`, which is the same key on each.
+pub fn shortcut(key: impl std::fmt::Display) -> String {
+    if cfg!(target_os = "macos") {
+        format!("⌘{key}")
+    } else {
+        format!("Ctrl+{key}")
+    }
+}
+
+/// [`shortcut`] with Shift: `⇧⌘E` on macOS, `Ctrl+Shift+E` elsewhere.
+pub fn shift_shortcut(key: impl std::fmt::Display) -> String {
+    if cfg!(target_os = "macos") {
+        format!("⇧⌘{key}")
+    } else {
+        format!("Ctrl+Shift+{key}")
+    }
+}
+
 /// `12,345`.
 pub fn count(n: u64) -> String {
     let digits = n.to_string();

@@ -39,6 +39,7 @@ use crate::views::palette::{self, PaletteCommand};
 use crate::views::rhythm::RhythmView;
 use crate::views::top_over_time::TopOverTimeView;
 use crate::views::track::TrackView;
+use crate::views::widgets;
 use crate::views::wrapped::WrappedView;
 
 /// How often History asks for plays newer than its top row. The Worker
@@ -385,7 +386,7 @@ impl Shell {
             .iter()
             .map(|group| {
                 let items = group.sections.iter().map(|&section| {
-                    let hint = SharedString::from(format!("⌘{}", section.shortcut()));
+                    let hint = SharedString::from(widgets::shortcut(section.shortcut()));
                     SidebarMenuItem::new(section.label())
                         .icon(section.icon())
                         .active(self.page == Page::Section(section))
@@ -436,7 +437,7 @@ impl Shell {
                     .ghost()
                     .small()
                     .icon(IconName::ArrowLeft)
-                    .tooltip("Back (⌘[)")
+                    .tooltip(format!("Back ({})", widgets::shortcut('[')))
                     .disabled(self.back.is_empty())
                     .on_click(cx.listener(|this, _, window, cx| this.go_back(&GoBack, window, cx))),
             )
@@ -446,7 +447,7 @@ impl Shell {
                     .ghost()
                     .small()
                     .icon(IconName::RefreshCw)
-                    .tooltip("Refresh (⌘R)")
+                    .tooltip(format!("Refresh ({})", widgets::shortcut('R')))
                     .on_click(
                         cx.listener(|this, _, window, cx| this.on_refresh(&Refresh, window, cx)),
                     ),
@@ -456,7 +457,7 @@ impl Shell {
                     .ghost()
                     .small()
                     .icon(IconName::Settings)
-                    .tooltip("Settings (⌘,)")
+                    .tooltip(format!("Settings ({})", widgets::shortcut(',')))
                     .on_click(cx.listener(|_, _, _, cx| cx.emit(ShellEvent::OpenSettings))),
             )
     }

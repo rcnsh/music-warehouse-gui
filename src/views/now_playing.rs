@@ -106,7 +106,10 @@ fn describe_error(error: &ApiError, retry_at: Option<String>) -> Line {
         ApiError::Unauthorized => (
             IconName::KeyRound,
             "Read token rejected",
-            Some("Sign in again in Settings (⌘,)".into()),
+            Some(format!(
+                "Sign in again in Settings ({})",
+                widgets::shortcut(',')
+            )),
         ),
         ApiError::Network(_) => (IconName::WifiOff, "Can't reach the Worker", retry),
         _ => (IconName::TriangleAlert, "Now playing unavailable", retry),

@@ -1,8 +1,9 @@
 use gpui::AppContext as _;
 use gpui::{
-    Context, Entity, IntoElement, ParentElement, Render, SharedString, Styled, Subscription,
-    Window, div,
+    Context, Decorations, Entity, IntoElement, ParentElement, Render, SharedString, Styled,
+    Subscription, Window, div,
 };
+use gpui_component::{TitleBar, v_flex};
 
 use crate::api::{self, ApiClient, Secret};
 use crate::appearance;
@@ -166,13 +167,32 @@ fn load_saved() -> Saved {
 }
 
 impl Render for AppRoot {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        div().size_full().child(match &self.screen {
-            Screen::Starting => {
-                widgets::loading_panel("Reading settings from the Keychain…", cx).into_any_element()
-            }
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let screen = match &self.screen {
+            Screen::Starting => widgets::loading_panel(
+                format!("Reading settings from the {}…", config::TOKEN_STORE),
+                cx,
+            )
+            .into_any_element(),
             Screen::Setup(setup) => setup.clone().into_any_element(),
             Screen::Main(shell) => shell.clone().into_any_element(),
-        })
+        };
+        if !draws_own_title_bar(window) {
+            return div().size_full().child(screen).into_any_element();
+        }
+        v_flex()
+            .size_full()
+            .child(TitleBar::new().child(div().text_sm().child("Music Warehouse")))
+            .child(div().flex_1().min_h_0().w_full().child(screen))
+            .into_any_element()
     }
+}
+
+/// A Wayland compositor without server-side decorations (GNOME) leaves the
+/// title bar to the app, and without one the window cannot be moved, resized
+/// from the top or closed by mouse. gpui-component's `Root` already draws the
+/// matching border and resize edges; KDE, X11, macOS and Windows draw their
+/// own title bar, so this stays off there.
+fn draws_own_title_bar(window: &Window) -> bool {
+    cfg!(target_os = "linux") && matches!(window.window_decorations(), Decorations::Client { .. })
 }

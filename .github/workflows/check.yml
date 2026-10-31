@@ -7,7 +7,19 @@ on:
 
 jobs:
   check:
-    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The release builds Linux on 22.04 for its older glibc; check there too.
+        os: [macos-latest, ubuntu-22.04, windows-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      # aws-lc-sys assembles with NASM on Windows, which the runner lacks; use
+      # its prebuilt objects. Ignored on other platforms.
+      AWS_LC_SYS_PREBUILT_NASM: 1
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
@@ -15,6 +27,9 @@ jobs:
           # Pinned by commit, the action cannot read the toolchain from its ref.
           toolchain: stable
           components: rustfmt, clippy
+      - name: Linux build dependencies
+        if: runner.os == 'Linux'
+        run: scripts/linux-build-deps.sh
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Check script
         run: cargo fmt --check && cargo clippy --locked --all-targets -- -D warnings && cargo test --locked

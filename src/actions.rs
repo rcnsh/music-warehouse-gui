@@ -117,30 +117,31 @@ impl ShowPlaysOfArtist {
 const TABLE_CONTEXT: &str = "DataTable";
 
 pub fn bind(cx: &mut App) {
-    // Page shortcuts follow the sidebar's order (see `views::nav`).
+    // `secondary` is ⌘ on macOS and Ctrl on Linux and Windows. Page shortcuts
+    // follow the sidebar's order (see `views::nav`).
     cx.bind_keys([
-        KeyBinding::new("cmd-1", ShowHistory, None),
-        KeyBinding::new("cmd-2", ShowOverview, None),
-        KeyBinding::new("cmd-3", ShowOnRepeat, None),
-        KeyBinding::new("cmd-4", ShowOnThisDay, None),
-        KeyBinding::new("cmd-5", ShowAlbums, None),
-        KeyBinding::new("cmd-6", ShowTopOverTime, None),
-        KeyBinding::new("cmd-7", ShowRhythm, None),
-        KeyBinding::new("cmd-8", ShowEras, None),
-        KeyBinding::new("cmd-9", ShowWrapped, None),
-        KeyBinding::new("cmd-0", ShowConcerts, None),
-        KeyBinding::new("cmd-[", GoBack, None),
-        KeyBinding::new("cmd-r", Refresh, None),
-        KeyBinding::new("cmd-f", FocusFilter, None),
-        KeyBinding::new("cmd-g", GoToDate, None),
-        KeyBinding::new("cmd-k", OpenCommandPalette, None),
-        KeyBinding::new("cmd-shift-e", ExportCsv, None),
-        KeyBinding::new("cmd-,", OpenSettings, None),
-        KeyBinding::new("cmd-q", Quit, None),
+        KeyBinding::new("secondary-1", ShowHistory, None),
+        KeyBinding::new("secondary-2", ShowOverview, None),
+        KeyBinding::new("secondary-3", ShowOnRepeat, None),
+        KeyBinding::new("secondary-4", ShowOnThisDay, None),
+        KeyBinding::new("secondary-5", ShowAlbums, None),
+        KeyBinding::new("secondary-6", ShowTopOverTime, None),
+        KeyBinding::new("secondary-7", ShowRhythm, None),
+        KeyBinding::new("secondary-8", ShowEras, None),
+        KeyBinding::new("secondary-9", ShowWrapped, None),
+        KeyBinding::new("secondary-0", ShowConcerts, None),
+        KeyBinding::new("secondary-[", GoBack, None),
+        KeyBinding::new("secondary-r", Refresh, None),
+        KeyBinding::new("secondary-f", FocusFilter, None),
+        KeyBinding::new("secondary-g", GoToDate, None),
+        KeyBinding::new("secondary-k", OpenCommandPalette, None),
+        KeyBinding::new("secondary-shift-e", ExportCsv, None),
+        KeyBinding::new("secondary-,", OpenSettings, None),
+        KeyBinding::new("secondary-q", Quit, None),
         KeyBinding::new("j", gpui_base::actions::SelectDown, Some(TABLE_CONTEXT)),
         KeyBinding::new("k", gpui_base::actions::SelectUp, Some(TABLE_CONTEXT)),
         KeyBinding::new("o", OpenInSpotify, Some(TABLE_CONTEXT)),
-        KeyBinding::new("cmd-c", CopyPlay, Some(TABLE_CONTEXT)),
+        KeyBinding::new("secondary-c", CopyPlay, Some(TABLE_CONTEXT)),
     ]);
     cx.on_action(|_: &Quit, cx| cx.quit());
     cx.on_action(|_: &UseSystemAppearance, cx| appearance::set(Appearance::System, cx));

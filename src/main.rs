@@ -1,3 +1,7 @@
+// Without this, Windows opens a console window beside the app's own. Debug
+// builds keep it, so `cargo run` still shows errors and panics.
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
 mod actions;
 mod api;
 mod appearance;
@@ -51,6 +55,9 @@ fn main() {
                 ..Default::default()
             }),
             window_min_size: Some(size(px(860.), px(560.))),
+            // Wayland's app_id and X11's WM_CLASS; it matches the desktop
+            // entry scripts/package-linux.sh installs, so docks show its icon.
+            app_id: Some(config::APP_DIR.into()),
             ..Default::default()
         };
         cx.open_window(options, |window, cx| {

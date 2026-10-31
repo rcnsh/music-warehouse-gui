@@ -1,7 +1,9 @@
 # music-warehouse-gui
 
-Native macOS app (Rust, GPUI) for exploring the Spotify history stored by the
-music-warehouse Worker (`~/dev/music-warehouse`). Read that repo's README,
+Native desktop app (Rust, GPUI) for exploring the Spotify history stored by the
+music-warehouse Worker (`~/dev/music-warehouse`). Built and developed on
+macOS; CI also checks and releases Linux and Windows builds (see "Linux and
+Windows" below). Read that repo's README,
 `src/api.ts`, `src/live.ts` and `src/types.ts` before changing anything that
 touches response shapes.
 
@@ -72,18 +74,22 @@ actually on screen.
 ## Releasing
 
 `.github/workflows/release.yml` publishes a GitHub release when a `v*` tag is
-pushed. It runs the check script, refuses a tag that doesn't match the
-`Cargo.toml` version, builds arm64 and x86_64 and joins them with `lipo`, then
-runs `scripts/bundle-macos.sh` (Info.plist, ad-hoc signature, `ditto` zip,
-SHA-256). The release body is `.github/release-notes.md` followed by
-generated notes.
+pushed. It runs the check script and refuses a tag that doesn't match the
+`Cargo.toml` version. macOS: builds arm64 and x86_64, joins them with `lipo`,
+then runs `scripts/bundle-macos.sh` (Info.plist, signature, `ditto` zip,
+SHA-256). Linux: builds x86_64 and arm64 on Ubuntu 22.04 (glibc 2.35) and
+runs `scripts/package-linux.sh` (binary, desktop entry, icon, tarball laid
+out like `~/.local`). Windows: builds x86_64 and zips `mwgui.exe`, unsigned.
+The `publish` job uploads everything only after all three platforms pass. The
+release body is `.github/release-notes.md` followed by generated notes.
 
 1. Bump `version` in `Cargo.toml`, run the check script (it updates
    `Cargo.lock`), commit.
 2. `git tag v0.2.0 && git push origin main v0.2.0`.
 
-Running the workflow by hand (`gh workflow run release.yml`) builds the zip as
-an artifact without publishing, for trying a release first. Not notarized:
+Running the workflow by hand (`gh workflow run release.yml`) builds every
+platform's file as an artifact without publishing, for trying a release
+first. Not notarized:
 that needs an Apple Developer ID certificate and secrets in the repo, and it
 would also stop each release from asking again for Keychain access.
 
@@ -110,7 +116,9 @@ and any snapshot may change GPUI's API.
 3. `cargo update -p gpui-pre -p gpui-component`, then run the check script and
    launch the app. Expect compile errors; fix them by reading the new sources,
    not from memory.
-4. Re-check the Overview chart click. `BarChart` has no click callback, so
+4. Check the PR's Linux and Windows CI legs too; snapshots often change
+   platform code you cannot compile from the Mac.
+5. Re-check the Overview chart click. `BarChart` has no click callback, so
    `views/overview.rs` rebuilds the chart's band layout with the public
    `ScaleBand` (same padding constants, value labels `Inside` so no measured
    gutter) and hit-tests clicks itself. If the chart's layout changes, clicks
@@ -118,7 +126,34 @@ and any snapshot may change GPUI's API.
 
 `gpui_platform` keeps the `runtime_shaders` feature: Xcode 26 ships without
 the Metal toolchain, and without this feature `gpui-pre-apple` fails to build
-(`cannot execute tool 'metal'`), locally and on CI.
+(`cannot execute tool 'metal'`), locally and on CI. It also keeps `wayland`
+and `x11`: `gpui-pre-linux` is pulled in without default features, so
+without them a Linux build has no windowing backend.
+
+## Linux and Windows
+
+Developed and tried by hand on macOS only; on Linux and Windows CI proves the
+check script passes and the release builds, nothing more. Keep them working:
+
+- Keybindings use `secondary-` (⌘ on macOS, Ctrl elsewhere), never `cmd-`.
+  Text that names a shortcut uses `widgets::shortcut` (or `shift_shortcut`)
+  rather than a literal `⌘`.
+- Windows builds need `AWS_LC_SYS_PREBUILT_NASM=1` (set in both workflows):
+  `aws-lc-sys` otherwise assembles with NASM, which runners lack.
+- GPUI keeps the menus on Linux and Windows but draws no menu bar, so every
+  menu command must also be in the ⌘K palette (`views/palette.rs`). Quit is
+  the exception: Ctrl+Q and the window's close button cover it.
+- Messages name the token store with `config::TOKEN_STORE`, not "Keychain".
+- On a Wayland compositor without server-side decorations (GNOME), GPUI falls
+  back to client-side ones and the app must draw its title bar.
+  `views/root.rs` adds gpui-component's `TitleBar` only then; `Root` draws the
+  border and resize edges. Recheck this after a GPUI upgrade.
+- `WindowOptions::app_id` (`music-warehouse-gui`) must match the desktop
+  entry's name in `scripts/package-linux.sh`, or docks lose the icon.
+- `scripts/linux-build-deps.sh` lists the apt packages the Linux build needs;
+  add to it there, since CI and the release both run it.
+- Cross-checking from the Mac (`cargo clippy --target …`) fails: `aws-lc-sys`
+  and `wayland-backend` compile C and need the target's sysroot. Use CI.
 
 ## Where the GPUI examples live
 

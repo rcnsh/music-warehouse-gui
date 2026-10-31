@@ -1,4 +1,4 @@
-//! Sign in with Spotify, so the Worker mints a read token for this Mac
+//! Sign in with Spotify, so the Worker mints a read token for this computer
 //! instead of the user copying one.
 //!
 //! This is the Worker's native-app flow: OAuth-style with PKCE (RFC 7636) and
@@ -9,7 +9,6 @@
 //! at `/auth/token` for the token. The Worker only ever mints read tokens
 //! here, and this module refuses anything else it might return.
 
-use std::process::Command;
 use std::time::Duration;
 
 use base64::Engine as _;
@@ -99,14 +98,23 @@ impl Pkce {
     }
 }
 
-/// The token name the Worker lists this Mac under, e.g. `macOS app (Studio)`.
+/// What the Worker's token list calls this app before the computer's name.
+const APP_LABEL: &str = if cfg!(target_os = "macos") {
+    "macOS app"
+} else if cfg!(windows) {
+    "Windows app"
+} else {
+    "Linux app"
+};
+
+/// The token name the Worker lists this computer under, e.g. `macOS app (Studio)`.
 pub fn device_name(computer: &str) -> String {
-    const PREFIX: &str = "macOS app (";
     let computer = computer.trim();
     if computer.is_empty() {
-        return "macOS app".into();
+        return APP_LABEL.into();
     }
-    let budget = MAX_NAME_UNITS - PREFIX.len() - 1;
+    // The label and its " (" and ")"; all ASCII, so bytes are UTF-16 units.
+    let budget = MAX_NAME_UNITS - APP_LABEL.len() - 3;
     let mut used = 0;
     let host: String = computer
         .chars()
@@ -115,18 +123,31 @@ pub fn device_name(computer: &str) -> String {
             used <= budget
         })
         .collect();
-    format!("{PREFIX}{})", host.trim_end())
+    format!("{APP_LABEL} ({})", host.trim_end())
 }
 
 /// The Mac's user-visible name from Sharing settings, if it has one.
+#[cfg(target_os = "macos")]
 fn computer_name() -> String {
-    Command::new("/usr/sbin/scutil")
+    std::process::Command::new("/usr/sbin/scutil")
         .args(["--get", "ComputerName"])
         .output()
         .ok()
         .filter(|out| out.status.success())
         .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_owned())
         .unwrap_or_default()
+}
+
+/// The PC's name, as set in Settings › System › About.
+#[cfg(windows)]
+fn computer_name() -> String {
+    std::env::var("COMPUTERNAME").unwrap_or_default()
+}
+
+/// The kernel's hostname, which every Linux system has.
+#[cfg(not(any(target_os = "macos", windows)))]
+fn computer_name() -> String {
+    std::fs::read_to_string("/proc/sys/kernel/hostname").unwrap_or_default()
 }
 
 /// `<base>/auth/<route>`, keeping any path prefix on the Worker URL.
@@ -458,11 +479,13 @@ mod tests {
 
     #[test]
     fn device_name_fits_the_workers_limit() {
-        assert_eq!(device_name("Studio"), "macOS app (Studio)");
-        assert_eq!(device_name("  "), "macOS app");
+        assert_eq!(device_name("Studio"), format!("{APP_LABEL} (Studio)"));
+        assert_eq!(device_name("  "), APP_LABEL);
         let long = device_name(&"é".repeat(100));
         assert!(long.encode_utf16().count() <= MAX_NAME_UNITS);
-        assert!(long.starts_with("macOS app (é") && long.ends_with("é)"));
+        // Filled to the limit: one more é would not fit.
+        assert!(long.encode_utf16().count() > MAX_NAME_UNITS - 1);
+        assert!(long.starts_with(&format!("{APP_LABEL} (é")) && long.ends_with("é)"));
         // A character outside the BMP counts twice, as in JavaScript.
         let emoji = device_name(&"🎧".repeat(40));
         assert!(emoji.encode_utf16().count() <= MAX_NAME_UNITS);
