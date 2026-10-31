@@ -11,7 +11,9 @@ path = "src/main.rs"
 
 [dependencies]
 gpui = { package = "gpui-pre", version = "=0.3.8" }
-gpui_platform = { package = "gpui-pre-platform", version = "=0.3.8", features = ["font-kit", "runtime_shaders"] }
+# `wayland` and `x11` pick the Linux backends; each feature only affects its
+# own platform, so all of them stay on everywhere.
+gpui_platform = { package = "gpui-pre-platform", version = "=0.3.8", features = ["font-kit", "runtime_shaders", "wayland", "x11"] }
 gpui-component = "=0.7.1"
 # Must match gpui-pre; it backs img() downloads.
 reqwest_client = { package = "gpui-pre-reqwest-client", version = "=0.3.8" }

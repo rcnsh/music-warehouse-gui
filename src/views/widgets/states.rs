@@ -13,9 +13,12 @@ pub fn describe(error: &ApiError) -> ErrorCopy {
     let (title, detail): (&str, String) = match error {
         ApiError::Unauthorized => (
             "Read token rejected",
-            "The Worker no longer accepts the saved token. Tokens from signing in expire after \
-             90 days. Open Settings (⌘,) to sign in with Spotify again or paste a token."
-                .into(),
+            format!(
+                "The Worker no longer accepts the saved token. Tokens from signing in expire \
+                 after 90 days. Open Settings ({}) to sign in with Spotify again or paste a \
+                 token.",
+                super::shortcut(',')
+            ),
         ),
         ApiError::NeedsReauth => (
             "Spotify needs re-authorizing",

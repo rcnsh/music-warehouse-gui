@@ -1,18 +1,20 @@
 <div align="center">
 <img src="assets/icon.svg" width="96" height="96" alt="">
 <h1>music-warehouse-gui</h1>
-<p><strong>A native macOS app for browsing your Spotify listening history.</strong></p>
+<p><strong>A native desktop app for browsing your Spotify listening history, on macOS, Linux and Windows.</strong></p>
 <p>
 <a href="LICENSE"><img alt="Licence: MIT" src="https://img.shields.io/badge/licence-MIT-blue?style=flat-square"></a>
 <a href="https://www.rust-lang.org"><img alt="Rust" src="https://img.shields.io/badge/Rust-000000?style=flat-square&logo=rust&logoColor=white"></a>
 <img alt="macOS 12+" src="https://img.shields.io/badge/macOS%2012%2B-000000?style=flat-square&logo=apple&logoColor=white">
+<img alt="Linux" src="https://img.shields.io/badge/Linux-000000?style=flat-square&logo=linux&logoColor=white">
+<img alt="Windows" src="https://img.shields.io/badge/Windows-000000?style=flat-square&logo=windows&logoColor=white">
 <a href="https://github.com/rcnsh/music-warehouse#clients"><img alt="Part of music-warehouse" src="https://img.shields.io/badge/part%20of-music--warehouse-1DB954?style=flat-square"></a>
 </p>
 <p><a href="#features">Features</a> · <a href="#quick-start">Quick start</a> · <a href="#install">Install</a> · <a href="#configuration">Configuration</a> · <a href="#keyboard-shortcuts">Shortcuts</a> · <a href="#development">Development</a></p>
 </div>
 
-Music Warehouse is a native macOS app for exploring the Spotify listening
-history stored by a [music-warehouse](https://github.com/rcnsh/music-warehouse)
+Music Warehouse is a native desktop app for macOS, Linux and Windows for
+exploring the Spotify listening history stored by a [music-warehouse](https://github.com/rcnsh/music-warehouse)
 Cloudflare Worker. It shows every stored play, daily counts, top artists and
 songs, yearly summaries and what is playing now. The Worker does the polling,
 storage and aggregation; the app only displays data, with a read-only token.
@@ -28,6 +30,9 @@ Built in Rust with [GPUI](https://www.gpui.rs) and
 <!-- ![Music Warehouse showing the History view](docs/screenshot.png) -->
 
 ## Features
+
+Shortcuts are written for macOS; on Linux and Windows, <kbd>Ctrl</kbd> takes
+the place of <kbd>⌘</kbd>.
 
 | Page | Shortcut | What it shows |
 |---|---|---|
@@ -53,7 +58,8 @@ Across the app:
   the previous page.
 - The window reopens where you left it, on the same page and ranges.
 - View › Appearance (or <kbd>⌘</kbd><kbd>K</kbd>, "theme") picks light, dark
-  or Match System.
+  or Match System. Linux and Windows have no menu bar; the palette has every
+  menu command but Quit (<kbd>Ctrl</kbd><kbd>Q</kbd>).
 
 ### History
 
@@ -143,7 +149,12 @@ you cancel.
   ([quick start](https://github.com/rcnsh/music-warehouse#quick-start)).
 - Either the Spotify account that owns it, or a read token such as
   `READ_TOKEN`.
-- macOS 12 or later, on Apple Silicon or Intel.
+- One of:
+  - macOS 12 or later, on Apple Silicon or Intel.
+  - Linux with glibc 2.35 or later (Ubuntu 22.04, Debian 12, Fedora 36 and
+    later) on x86_64 or arm64, a Vulkan driver, and a Secret Service keyring
+    (GNOME Keyring or KWallet) to hold the token.
+  - Windows 10 or later, on x86_64 (or arm64 through emulation).
 
 ## Quick start
 
@@ -157,8 +168,9 @@ you cancel.
 2. On first launch, enter the Worker URL (for example
    `https://music-warehouse.<you>.workers.dev`).
 3. Click **Sign in with Spotify** and approve in your browser. The Worker
-   mints a read token for this Mac (listed as `macOS app (<computer name>)`)
-   and the app saves it.
+   mints a read token for this computer (listed as
+   `macOS app (<computer name>)`, `Linux app (…)` or `Windows app (…)`) and
+   the app saves it.
 
    Or paste `READ_TOKEN` or another read token, click **Test connection**,
    then **Save**.
@@ -182,14 +194,31 @@ The URL to enter is the Worker's custom domain, or
 
 ## Install
 
-Download the zip from the latest
-[GitHub release](https://github.com/rcnsh/music-warehouse-gui/releases), unzip
-it and move **Music Warehouse.app** to Applications. It is a universal app for
-Apple Silicon and Intel Macs on macOS 12 or later. If there is no release
-yet, build from source as in [Quick start](#quick-start).
+Download your platform's file from the latest
+[GitHub release](https://github.com/rcnsh/music-warehouse-gui/releases). If
+there is no release yet, build from source as in
+[Quick start](#quick-start).
 
-Releases are signed with a Developer ID and notarized by Apple, so the app
-opens without a Gatekeeper prompt.
+- **macOS:** unzip `…-macos.zip` and move **Music Warehouse.app** to
+  Applications. It is a universal app for Apple Silicon and Intel Macs on
+  macOS 12 or later, signed with a Developer ID and notarized by Apple, so it
+  opens without a Gatekeeper prompt.
+- **Linux:** unpack `…-linux-x86_64.tar.gz` (or `aarch64`). It is laid out
+  like `~/.local`, so copying it there installs the binary, a desktop entry
+  and the icon:
+
+  ```bash
+  tar -xzf music-warehouse-gui-<version>-linux-x86_64.tar.gz
+  cp -r music-warehouse-gui-<version>-linux-x86_64/* ~/.local/
+  ```
+
+  The desktop entry runs `mwgui` from `PATH`. If `~/.local/bin` is not on
+  your session's `PATH` (a new account before its next login, say), the app
+  menu entry will not start it until it is.
+
+- **Windows:** unzip `…-windows-x86_64.zip` and run `mwgui.exe`. It is not
+  signed, so SmartScreen warns before the first launch (**More info › Run
+  anyway**).
 
 ## Configuration
 
@@ -198,9 +227,13 @@ are no config flags for normal builds.
 
 | What | Where |
 |---|---|
-| Worker URL | `~/Library/Application Support/music-warehouse-gui/config.json` (`worker_url`) |
-| Read token (signed in or pasted) | macOS Keychain, service `music-warehouse-gui`, account `READ_TOKEN`. Never written to disk. |
-| Window frame, last page, Overview ranges, appearance | `~/Library/Application Support/music-warehouse-gui/ui-state.json` |
+| Worker URL | `config.json` (`worker_url`) in the settings folder below |
+| Read token (signed in or pasted) | The platform's credential store, service `music-warehouse-gui`, account `READ_TOKEN`: the macOS Keychain, the Secret Service on Linux, Windows Credential Manager. Never written to disk. |
+| Window frame, last page, Overview ranges, appearance | `ui-state.json` in the settings folder |
+
+The settings folder is `~/Library/Application Support/music-warehouse-gui`
+on macOS, `~/.config/music-warehouse-gui` on Linux (or under
+`$XDG_CONFIG_HOME`) and `%APPDATA%\music-warehouse-gui` on Windows.
 
 Delete `config.json` to get the first-run setup screen again. A broken
 `ui-state.json` only resets window and view state.
@@ -209,10 +242,14 @@ Delete `config.json` to get the first-run setup screen again. A broken
 > Use `READ_TOKEN`, not `ADMIN_TOKEN`. Setup probes the Worker and refuses a
 > token with admin access.
 
-Each rebuild of an ad-hoc-signed binary has a new signature, so macOS asks
-again before releasing the Keychain item. "Always Allow" covers one build.
+On macOS, each rebuild of an ad-hoc-signed binary has a new signature, so
+macOS asks again before releasing the Keychain item. "Always Allow" covers
+one build.
 
 ## Keyboard shortcuts
+
+On Linux and Windows, use <kbd>Ctrl</kbd> wherever this table says
+<kbd>⌘</kbd>.
 
 | Shortcut | Action |
 |---|---|
@@ -231,17 +268,19 @@ again before releasing the Keychain item. "Always Allow" covers one build.
 
 ## Development
 
-You need a Mac with a stable Rust toolchain (edition 2024) and the Xcode
-command line tools. You need a running Worker and a `READ_TOKEN` to see real
-data; tests use the fixtures in `tests/fixtures/` and make no network calls.
+You need a stable Rust toolchain (edition 2024) and, on macOS, the Xcode
+command line tools; on Linux, `scripts/linux-build-deps.sh` installs the
+system libraries (Debian and Ubuntu); on Windows, the MSVC build tools. You
+need a running Worker and a `READ_TOKEN` to see real data; tests use the
+fixtures in `tests/fixtures/` and make no network calls.
 
 ```bash
 cargo run                                   # debug build
 cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
 ```
 
-The second line is what CI runs (`.github/workflows/check.yml`); run it before
-opening a PR. See [ARCHITECTURE.md](ARCHITECTURE.md) for how the code fits
+The second line is what CI runs (`.github/workflows/check.yml`) on macOS,
+Linux and Windows; run it before opening a PR. See [ARCHITECTURE.md](ARCHITECTURE.md) for how the code fits
 together.
 
 <details>
@@ -263,7 +302,8 @@ variables:
 
 ```bash
 cargo build --release                  # binary at target/release/mwgui
-scripts/bundle-macos.sh target/release/mwgui 0.1.0 dist
+scripts/bundle-macos.sh target/release/mwgui 0.1.0 dist          # macOS
+scripts/package-linux.sh target/release/mwgui 0.1.0 x86_64 dist  # Linux
 ```
 
 `bundle-macos.sh` wraps the binary in `Music Warehouse.app`, signs it and
@@ -273,11 +313,16 @@ as well (`NOTARY_PROFILE`, or `APPLE_ID`, `APPLE_APP_PASSWORD` and
 `APPLE_TEAM_ID`) it notarizes and staples the app. The script's header has
 the details.
 
+`package-linux.sh` packs the binary, a desktop entry and the icon into a
+tarball laid out like `~/.local`, with its SHA-256.
+
 Releases are built by `.github/workflows/release.yml` when a `v*` tag is
-pushed. It runs the checks, refuses a tag that does not match the
-`Cargo.toml` version, builds arm64 and x86_64, joins them with `lipo` and
-publishes the bundled zip, signed and notarized with these repository
-secrets:
+pushed. It runs the checks and refuses a tag that does not match the
+`Cargo.toml` version. For macOS it builds arm64 and x86_64 and joins them
+with `lipo`; for Linux it builds x86_64 and arm64 tarballs on Ubuntu 22.04;
+for Windows it builds an x86_64 zip. It publishes all of them together once
+every build has passed. The macOS app is signed and notarized with these
+repository secrets:
 
 | Secret | What it holds |
 |---|---|
@@ -294,8 +339,8 @@ Without them it signs ad hoc and skips notarization.
 git tag v0.2.0 && git push origin main v0.2.0
 ```
 
-`gh workflow run release.yml` builds the zip as an artifact without
-publishing.
+`gh workflow run release.yml` builds every platform's file as an artifact
+without publishing.
 
 ### Contributing
 
@@ -314,7 +359,7 @@ Issues and pull requests are welcome.
 | Project | What it is |
 |---|---|
 | [music-warehouse](https://github.com/rcnsh/music-warehouse) | The Worker: records your plays and serves the API |
-| [music-warehouse-gui](https://github.com/rcnsh/music-warehouse-gui) (this repo) | Native macOS app for browsing your history |
+| [music-warehouse-gui](https://github.com/rcnsh/music-warehouse-gui) (this repo) | Desktop app for browsing your history on macOS, Linux and Windows |
 | [music-warehouse-mcp](https://github.com/rcnsh/music-warehouse-mcp) | MCP server so AI agents can query your history |
 | [music-warehouse-spicetify](https://github.com/rcnsh/music-warehouse-spicetify) | Stats inside the Spotify desktop client |
 | [music-warehouse-wrapped](https://github.com/rcnsh/music-warehouse-wrapped) | Wrapped-style stories for any range, in the browser |

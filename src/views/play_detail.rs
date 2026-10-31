@@ -221,7 +221,7 @@ pub fn render(play: &Play, unsaved: bool, actions: DetailActions, cx: &App) -> A
                         .small()
                         .icon(IconName::Copy)
                         .label("Copy")
-                        .tooltip("⌘C")
+                        .tooltip(widgets::shortcut('C'))
                         .on_click(actions.on_copy),
                 ),
         )

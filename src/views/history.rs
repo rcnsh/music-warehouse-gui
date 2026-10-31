@@ -790,7 +790,13 @@ impl HistoryView {
                     Button::new("export-reveal")
                         .xsmall()
                         .ghost()
-                        .label("Show in Finder")
+                        .label(if cfg!(target_os = "macos") {
+                            "Show in Finder"
+                        } else if cfg!(windows) {
+                            "Show in Explorer"
+                        } else {
+                            "Show in Folder"
+                        })
                         .on_click(move |_, _, cx| cx.reveal_path(&reveal)),
                 )
             }
@@ -957,7 +963,10 @@ impl Render for HistoryView {
                             .small()
                             .ghost()
                             .icon(IconName::Download)
-                            .tooltip("Export these plays as CSV… (⇧⌘E)")
+                            .tooltip(format!(
+                                "Export these plays as CSV… ({})",
+                                widgets::shift_shortcut('E')
+                            ))
                             .on_click(
                                 cx.listener(|this, _, window, cx| this.export_csv(window, cx)),
                             ),
@@ -966,7 +975,11 @@ impl Render for HistoryView {
                         div()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .child("⌘F search · ⌘G date · j/k move"),
+                            .child(format!(
+                                "{} search · {} date · j/k move",
+                                widgets::shortcut('F'),
+                                widgets::shortcut('G')
+                            )),
                     ),
             )
             .when_some(

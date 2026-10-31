@@ -130,7 +130,7 @@ impl Section {
         }
     }
 
-    /// The digit after ⌘ that shows this page.
+    /// The digit after ⌘ (Ctrl off macOS) that shows this page.
     pub fn shortcut(self) -> char {
         match self {
             Self::History => '1',
