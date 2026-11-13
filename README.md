@@ -276,7 +276,7 @@ fixtures in `tests/fixtures/` and make no network calls.
 
 ```bash
 cargo run                                   # debug build
-cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
+cargo fmt --check && cargo clippy --locked --all-targets -- -D warnings && cargo test --locked
 ```
 
 The second line is what CI runs (`.github/workflows/check.yml`) on macOS,

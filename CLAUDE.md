@@ -12,7 +12,7 @@ touches response shapes.
 ```bash
 cargo run                                   # debug build, binary is `mwgui`
 cargo run --release
-cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test   # the check script
+cargo fmt --check && cargo clippy --locked --all-targets -- -D warnings && cargo test --locked   # the check script
 ```
 
 First launch shows setup: Worker URL, then Sign in with Spotify (mints a
@@ -85,13 +85,14 @@ release body is `.github/release-notes.md` followed by generated notes.
 
 1. Bump `version` in `Cargo.toml`, run the check script (it updates
    `Cargo.lock`), commit.
-2. `git tag v0.2.0 && git push origin main v0.2.0`.
+2. `git tag v<version> && git push origin main v<version>`.
 
 Running the workflow by hand (`gh workflow run release.yml`) builds every
 platform's file as an artifact without publishing, for trying a release
-first. Not notarized:
-that needs an Apple Developer ID certificate and secrets in the repo, and it
-would also stop each release from asking again for Keychain access.
+first. The macOS app is signed with the Developer ID and notarized in CI
+(secrets `MACOS_CERTIFICATE_P12`, `MACOS_CERTIFICATE_PASSWORD`, `APPLE_ID`,
+`APPLE_APP_PASSWORD`, `APPLE_TEAM_ID`); without them it signs ad hoc. See
+README, "Build and release".
 
 ## Pinned GPUI versions
 

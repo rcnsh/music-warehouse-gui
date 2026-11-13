@@ -54,7 +54,7 @@ config.json + Keychain ──> AppRoot ──> SetupView      (no config or toke
 | `src/views/` | One file per view; `widgets/` has shared states (`states.rs`), rows (`rows.rs`), charts (`charts.rs`) and the other page building blocks (`mod.rs`) |
 | `src/dev_capture.rs` | `dev-capture` feature only: render the window to PNG, dispatch actions, scroll and click on request |
 | `tests/fixtures/` | Captured and hand-written API responses used by unit tests (see `NOTES.md`) |
-| `scripts/bundle-macos.sh` | Builds, ad-hoc signs and zips `Music Warehouse.app` |
+| `scripts/bundle-macos.sh` | Wraps the binary in `Music Warehouse.app`, signs it (ad hoc, or Developer ID with notarization when credentials are set) and zips it |
 
 ## External services
 
@@ -65,7 +65,7 @@ config.json + Keychain ──> AppRoot ──> SetupView      (no config or toke
   for signing in.
 - **Spotify image CDN**: album art and artist photos, fetched by GPUI's
   `img()` through `gpui-pre-reqwest-client` and kept in GPUI's asset cache.
-- **macOS Keychain**: the token, via the `keyring` crate.
+- **Platform credential store** (macOS Keychain, Secret Service, Windows Credential Manager): the token, via the `keyring` crate.
 
 ## Decisions
 
