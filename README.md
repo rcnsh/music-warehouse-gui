@@ -336,7 +336,7 @@ Without them it signs ad hoc and skips notarization.
 
 ```bash
 # after bumping version in Cargo.toml and committing
-git tag v0.2.0 && git push origin main v0.2.0
+git tag v<version> && git push origin main v<version>
 ```
 
 `gh workflow run release.yml` builds every platform's file as an artifact
